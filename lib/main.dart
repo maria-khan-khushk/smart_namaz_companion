@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'utils/theme.dart';
 import 'screens/home_screen.dart';
-
+import 'screens/settings_screen.dart';
 void main() {
   runApp(MyApp());
 }

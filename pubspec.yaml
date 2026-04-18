@@ -25,7 +25,7 @@ dependencies:
   shared_preferences: ^2.2.2
 
   # Notifications & Audio
-  flutter_local_notifications: ^16.3.0
+  flutter_local_notifications: ^17.2.1
   audioplayers: ^5.2.1
 
   # Qibla Compass (corrected package name)
