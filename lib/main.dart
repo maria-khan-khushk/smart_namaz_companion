@@ -1,25 +1,30 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'providers/language_provider.dart';
 import 'utils/theme.dart';
-import 'screens/home_screen.dart';
-import 'screens/settings_screen.dart';
-void main() {
+import 'screens/main_wrapper.dart';
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
   runApp(MyApp());
 }
 
 class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-    return ChangeNotifierProvider(
-      create: (_) => ThemeNotifier(),
-      child: Consumer<ThemeNotifier>(
-        builder: (context, themeNotifier, child) {
+    return MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => ThemeNotifier()),
+        ChangeNotifierProvider(create: (_) => LanguageProvider()),
+      ],
+      child: Consumer2<ThemeNotifier, LanguageProvider>(
+        builder: (context, themeNotifier, languageProvider, child) {
           return MaterialApp(
             title: 'Smart Namaz Companion',
             theme: AppTheme.lightTheme,
             darkTheme: AppTheme.darkTheme,
             themeMode: themeNotifier.themeMode,
-            home: HomeScreen(),
+            home: MainWrapper(),
             debugShowCheckedModeBanner: false,
           );
         },
@@ -28,7 +33,6 @@ class MyApp extends StatelessWidget {
   }
 }
 
-// Simple provider to switch theme
 class ThemeNotifier extends ChangeNotifier {
   ThemeMode _themeMode = ThemeMode.system;
   ThemeMode get themeMode => _themeMode;

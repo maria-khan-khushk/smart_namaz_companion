@@ -8,9 +8,10 @@ environment:
   sdk: ^3.10.8
 
 dependencies:
+  table_calendar: ^3.0.9
   flutter:
     sdk: flutter
-
+    
   # UI & Icons
   cupertino_icons: ^1.0.8
   flutter_svg: ^2.0.9
@@ -18,8 +19,11 @@ dependencies:
   # Location & Permissions
   geolocator: ^10.1.0
 
-  # Networking
+  timezone: ^0.9.4                        # timezone handling ke liye
+
   http: ^1.1.0
+
+  
 
   # Local Storage
   shared_preferences: ^2.2.2
@@ -46,6 +50,6 @@ flutter:
   uses-material-design: true
 
   # Assets folder (you'll add images/sounds later)
-  # assets:
-  #   - assets/azan_sounds/
+  assets:
+    - assets/azan_sounds/
   #   - assets/hadith.json
