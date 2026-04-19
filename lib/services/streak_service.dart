@@ -2,77 +2,108 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/daily_prayer_record.dart';
 
-
 class StreakService {
-  static const String _storageKey = 'prayer_records';
+  static const String _recordsKey = 'prayer_records';
+  static const String _currentStreakKey = 'current_streak';
+  static const String _bestStreakKey = 'best_streak';
 
-  Future<void> saveRecord(DailyPrayerRecord record) async {
+  Future<Map<DateTime, DailyPrayerRecord>> getAllRecords() async {
     final prefs = await SharedPreferences.getInstance();
-    final allRecords = await getAllRecords();
-    // Remove existing record for same date if any
-    allRecords.removeWhere((r) => r.date.year == record.date.year && r.date.month == record.date.month && r.date.day == record.date.day);
-    allRecords.add(record);
-    final jsonList = allRecords.map((r) => r.toJson()).toList();
-    await prefs.setString(_storageKey, jsonEncode(jsonList));
-  }
+    final String? data = prefs.getString(_recordsKey);
+    if (data == null) return {};
 
-  Future<List<DailyPrayerRecord>> getAllRecords() async {
-    final prefs = await SharedPreferences.getInstance();
-    final jsonString = prefs.getString(_storageKey);
-    if (jsonString == null) return [];
-    final List<dynamic> jsonList = jsonDecode(jsonString);
-    return jsonList.map((json) => DailyPrayerRecord.fromJson(json)).toList();
+    final decoded = json.decode(data);
+    final Map<DateTime, DailyPrayerRecord> records = {};
+
+    // If old List format, clear it and return empty
+    if (decoded is List) {
+      print("Old list format found. Clearing corrupted data.");
+      await prefs.remove(_recordsKey);
+      return {};
+    }
+    else if (decoded is Map<String, dynamic>) {
+      decoded.forEach((key, value) {
+        try {
+          final record = DailyPrayerRecord.fromJson(value);
+          records[DateTime(record.date.year, record.date.month, record.date.day)] = record;
+        } catch (e) {
+          print("Error parsing record: $e");
+        }
+      });
+    }
+    return records;
   }
 
   Future<DailyPrayerRecord?> getRecordForDate(DateTime date) async {
-    final all = await getAllRecords();
-    try {
-      return all.firstWhere((r) => r.date.year == date.year && r.date.month == date.month && r.date.day == date.day);
-    } catch (e) {
-      return null;
-    }
+    final records = await getAllRecords();
+    final normalized = DateTime(date.year, date.month, date.day);
+    return records[normalized];
   }
 
-  // Get current streak (consecutive days where all prayers completed)
-  Future<int> getCurrentStreak() async {
+  Future<void> saveRecord(DailyPrayerRecord record) async {
+    final prefs = await SharedPreferences.getInstance();
+    final records = await getAllRecords();  // This will now clear old List data
+    final normalized = DateTime(record.date.year, record.date.month, record.date.day);
+    records[normalized] = record;
+
+    final Map<String, dynamic> jsonMap = {};
+    records.forEach((date, rec) {
+      jsonMap[date.toIso8601String()] = rec.toJson();
+    });
+    await prefs.setString(_recordsKey, json.encode(jsonMap));
+    await _updateStreakCounts();
+  }
+
+  Future<void> _updateStreakCounts() async {
+    final prefs = await SharedPreferences.getInstance();
     final records = await getAllRecords();
+    final sortedDates = records.keys.toList()..sort((a, b) => a.compareTo(b));
+
+    int currentStreak = 0;
+    int bestStreak = 0;
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
-    int streak = 0;
-    DateTime day = today;
+
+    DateTime checkDate = today;
     while (true) {
-      final record = records.firstWhere(
-        (r) => r.date.year == day.year && r.date.month == day.month && r.date.day == day.day,
-        orElse: () => DailyPrayerRecord(date: day, prayersCompleted: {}),
-      );
-      if (record.allCompleted) {
-        streak++;
-        day = day.subtract(Duration(days: 1));
+      final record = records[checkDate];
+      if (record != null && record.allCompleted) {
+        currentStreak++;
+        checkDate = checkDate.subtract(Duration(days: 1));
       } else {
         break;
       }
     }
-    return streak;
+
+    int tempStreak = 0;
+    DateTime? prevDate;
+    for (var date in sortedDates) {
+      final record = records[date];
+      if (record != null && record.allCompleted) {
+        if (prevDate == null || date.difference(prevDate).inDays == 1) {
+          tempStreak++;
+        } else {
+          tempStreak = 1;
+        }
+        if (tempStreak > bestStreak) bestStreak = tempStreak;
+        prevDate = date;
+      } else {
+        tempStreak = 0;
+        prevDate = null;
+      }
+    }
+
+    await prefs.setInt(_currentStreakKey, currentStreak);
+    await prefs.setInt(_bestStreakKey, bestStreak);
   }
 
-  // Mark a prayer as completed for today
-  Future<void> markPrayerCompleted(String prayerName) async {
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    var record = await getRecordForDate(today);
-    if (record == null) {
-      final initialPrayers = {
-        'Fajr': false,
-        'Dhuhr': false,
-        'Asr': false,
-        'Maghrib': false,
-        'Isha': false,
-      };
-      initialPrayers[prayerName] = true;
-      record = DailyPrayerRecord(date: today, prayersCompleted: initialPrayers);
-    } else {
-      record.prayersCompleted[prayerName] = true;
-    }
-    await saveRecord(record);
+  Future<int> getCurrentStreak() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getInt(_currentStreakKey) ?? 0;
+  }
+
+  Future<int> getBestStreak() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getInt(_bestStreakKey) ?? 0;
   }
 }
