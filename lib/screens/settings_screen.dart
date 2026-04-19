@@ -3,7 +3,6 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../main.dart';
 import '../utils/theme.dart';
-import '../services/hadith_service.dart';
 import '../services/notification_service.dart';
 import '../services/location_service.dart';
 import '../services/prayer_api_service.dart';
@@ -132,7 +131,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Widget build(BuildContext context) {
     final themeNotifier = Provider.of<ThemeNotifier>(context);
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final todaysHadith = HadithService.getTodaysHadith();
     final languageProvider = Provider.of<LanguageProvider>(context);
     final isUrdu = languageProvider.isUrdu;
 
@@ -179,90 +177,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           SizedBox(height: 16),
 
-          // Alarm / Reminder settings card
+          // Azan Alerts card (only this remains from the previous "Alarm/Reminder" card)
           Card(
             elevation: 2,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-            child: Column(
-              children: [
-                ListTile(
-                  leading: Icon(Icons.alarm, color: AppColors.primaryMuted),
-                  title: Text(isUrdu ? 'نماز کی یاددہانی' : 'Prayer Reminders'),
-                  subtitle: Text(isUrdu ? 'نماز کے لیے دستی یاددہانیاں مقرر کریں' : 'Set manual reminders for prayers'),
-                  trailing: Icon(Icons.arrow_forward_ios, size: 16),
-                  onTap: () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text(isUrdu ? 'دستی یاددہانیاں جلد آرہی ہیں' : 'Manual reminders coming soon!'))
-                    );
-                  },
-                ),
-                Divider(height: 0),
-                ListTile(
-                  leading: Icon(Icons.notifications_active, color: AppColors.primaryMuted),
-                  title: Text(isUrdu ? 'اذان الرٹس' : 'Azan Alerts'),
-                  subtitle: Text(isUrdu ? 'خودکار اذان اطلاعات کو فعال/غیر فعال کریں' : 'Enable/disable automatic Azan notifications'),
-                  trailing: _isLoading
-                      ? SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2))
-                      : Switch(
-                          value: _notificationsEnabled,
-                          onChanged: _toggleNotifications,
-                          activeColor: AppColors.primaryMuted,
-                        ),
-                ),
-              ],
+            child: ListTile(
+              leading: Icon(Icons.notifications_active, color: AppColors.primaryMuted),
+              title: Text(isUrdu ? 'اذان الرٹس' : 'Azan Alerts'),
+              subtitle: Text(isUrdu ? 'خودکار اذان اطلاعات کو فعال/غیر فعال کریں' : 'Enable/disable automatic Azan notifications'),
+              trailing: _isLoading
+                  ? SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2))
+                  : Switch(
+                      value: _notificationsEnabled,
+                      onChanged: _toggleNotifications,
+                      activeColor: AppColors.primaryMuted,
+                    ),
             ),
           ),
           SizedBox(height: 16),
-          
-          // Daily Hadith card
-          Card(
-            elevation: 2,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-            child: Padding(
-              padding: EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Icon(Icons.menu_book, color: AppColors.primaryMuted),
-                      SizedBox(width: 8),
-                      Text(
-                        isUrdu ? 'روزانہ حدیث' : 'Daily Hadith',
-                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                      ),
-                      Spacer(),
-                      Icon(Icons.note_add_outlined, size: 20, color: Colors.grey),
-                    ],
-                  ),
-                  SizedBox(height: 12),
-                  Text(
-                    todaysHadith.arabic,
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w500),
-                    textAlign: TextAlign.center,
-                  ),
-                  SizedBox(height: 12),
-                  Text(
-                    todaysHadith.translation,
-                    style: TextStyle(fontSize: 16, fontStyle: FontStyle.italic),
-                  ),
-                  SizedBox(height: 8),
-                  Text(
-                    todaysHadith.explanation,
-                    style: TextStyle(fontSize: 14, color: Colors.grey.shade700),
-                  ),
-                  SizedBox(height: 8),
-                  Text(
-                    "- ${todaysHadith.reference}",
-                    style: TextStyle(fontSize: 12, color: Colors.grey),
-                    textAlign: TextAlign.end,
-                  ),
-                ],
-              ),
-            ),
-          ),
-          SizedBox(height: 16),
-          
+
           // About section
           Card(
             elevation: 2,

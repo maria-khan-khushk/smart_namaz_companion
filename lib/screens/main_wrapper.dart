@@ -5,7 +5,7 @@ import '../utils/theme.dart';
 import 'home_screen.dart';
 import 'qibla_screen.dart';
 import 'tasbeeh_screen.dart';
-import 'settings_screen.dart';
+import 'reminders_screen.dart';   // new screen for reminders
 
 class MainWrapper extends StatefulWidget {
   @override
@@ -19,7 +19,7 @@ class _MainWrapperState extends State<MainWrapper> {
     HomeScreen(),
     QiblaScreen(),
     TasbeehScreen(),
-    SettingsScreen(),
+    RemindersScreen(),   // replaced SettingsScreen with RemindersScreen
   ];
 
   @override
@@ -55,8 +55,8 @@ class _MainWrapperState extends State<MainWrapper> {
             label: isUrdu ? 'تسبیح' : 'Tasbeeh',
           ),
           BottomNavigationBarItem(
-            icon: Icon(Icons.settings),
-            label: isUrdu ? 'سیٹنگز' : 'Settings',
+            icon: Icon(Icons.alarm),   // changed from settings to alarm
+            label: isUrdu ? 'یاد دہانی' : 'Reminders',
           ),
         ],
       ),

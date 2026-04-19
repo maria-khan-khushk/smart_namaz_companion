@@ -8,6 +8,7 @@ environment:
   sdk: ^3.10.8
 
 dependencies:
+  hijri_date: ^1.0.1   # Islamic calendar package
   table_calendar: ^3.0.9
   flutter:
     sdk: flutter
@@ -52,4 +53,4 @@ flutter:
   # Assets folder (you'll add images/sounds later)
   assets:
     - assets/azan_sounds/
-  #   - assets/hadith.json
+    - assets/hadiths.json

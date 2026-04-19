@@ -1,39 +1,37 @@
+import 'dart:convert';
+import 'package:flutter/services.dart';
 import '../models/hadith_model.dart';
 
 class HadithService {
-  static final List<HadithModel> _hadithList = [
-    HadithModel(
-      arabic: "إنما الأعمال بالنيات",
-      translation: "Actions are judged by intentions",
-      explanation: "The value of deeds depends on the intentions behind them.",
-      reference: "Bukhari & Muslim",
-    ),
-    HadithModel(
-      arabic: "لا ضرر ولا ضرار",
-      translation: "There should be no harm nor reciprocating harm",
-      explanation: "Do not harm others or return harm.",
-      reference: "Ibn Majah",
-    ),
-    HadithModel(
-      arabic: "أحب الناس إلى الله أنفعهم للناس",
-      translation: "The most beloved of people to Allah are those who are most beneficial to people.",
-      explanation: "Helping others is a great deed.",
-      reference: "Tabarani",
-    ),
-    HadithModel(
-      arabic: "طلب العلم فريضة على كل مسلم",
-      translation: "Seeking knowledge is an obligation upon every Muslim.",
-      explanation: "Education is important for all.",
-      reference: "Ibn Majah",
-    ),
-  ];
+  static List<HadithModel>? _allHadiths;
+  static HadithModel? _cachedTodaysHadith;
+  static int _cachedDayOfYear = -1;
 
-  static HadithModel getTodaysHadith() {
-    // Calculate day of year
+  static Future<List<HadithModel>> loadHadiths() async {
+    if (_allHadiths != null) return _allHadiths!;
+    final String jsonString = await rootBundle.loadString('assets/hadiths.json');
+    final List<dynamic> jsonList = json.decode(jsonString);
+    _allHadiths = jsonList.map((item) => HadithModel.fromJson(item)).toList();
+    return _allHadiths!;
+  }
+
+  static Future<HadithModel> getTodaysHadith() async {
     final now = DateTime.now();
-    final start = DateTime(now.year, 1, 1);
-    final dayOfYear = now.difference(start).inDays;
-    final index = dayOfYear % _hadithList.length;
-    return _hadithList[index];
+    final todayDayOfYear = now.difference(DateTime(now.year, 1, 1)).inDays;
+
+    if (_cachedTodaysHadith != null && _cachedDayOfYear == todayDayOfYear) {
+      return _cachedTodaysHadith!;
+    }
+
+    final hadiths = await loadHadiths();
+    final index = todayDayOfYear % hadiths.length;
+    _cachedTodaysHadith = hadiths[index];
+    _cachedDayOfYear = todayDayOfYear;
+    return _cachedTodaysHadith!;
+  }
+
+  static Future<void> preload() async {
+    await loadHadiths();
+    await getTodaysHadith();
   }
 }
