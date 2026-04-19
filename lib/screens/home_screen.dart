@@ -438,4 +438,4 @@ Widget _buildHadithCard(HadithModel hadith, bool isUrdu) {
       ),
     );
   }
-}
+} 
