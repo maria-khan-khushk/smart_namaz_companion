@@ -38,6 +38,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _scheduleAllPrayerNotifications() async {
+    // Get prayer times (cached or fresh)
     PrayerTimeModel? prayerTimes = await PrefsHelper.getCachedPrayerTimes();
     
     if (prayerTimes == null) {
@@ -50,12 +51,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
         final apiService = PrayerApiService();
         prayerTimes = await apiService.fetchPrayerTimes(position.latitude, position.longitude);
         await PrefsHelper.cachePrayerTimes(prayerTimes);
+        print("Fetched fresh prayer times for notifications");
       } catch (e) {
         print("Failed to fetch prayer times for notifications: $e");
-        return;
+        throw Exception("Could not fetch prayer times. Please check location and network.");
       }
+    } else {
+      print("Using cached prayer times for notifications");
     }
 
+    // Cancel existing notifications
     await NotificationService.cancelAllNotifications();
 
     final now = DateTime.now();
@@ -69,6 +74,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       {'name': 'Isha', 'time': prayerTimes.isha},
     ];
 
+    // Schedule each prayer
     for (int i = 0; i < prayers.length; i++) {
       final prayer = prayers[i];
       final timeStr = prayer['time'];
@@ -97,34 +103,53 @@ class _SettingsScreenState extends State<SettingsScreen> {
         scheduledTime: scheduledTime,
         soundPath: 'azan',
       );
+      print("Scheduled ${prayer['name']} at ${scheduledTime.toLocal()}");
     }
 
-    print("Notifications scheduled for all prayers");
+    print("All prayer notifications scheduled successfully");
   }
 
   Future<void> _toggleNotifications(bool value) async {
     if (value) {
+      // Enable notifications
       setState(() => _isLoading = true);
-      await _scheduleAllPrayerNotifications();
-      setState(() {
-        _notificationsEnabled = true;
-        _isLoading = false;
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(Provider.of<LanguageProvider>(context, listen: false).isUrdu 
-            ? 'اذان الرٹس فعال! اطلاعات مقرر ہوگئیں۔' 
-            : "Azan alerts enabled! Notifications scheduled.")),
-      );
+      try {
+        await _scheduleAllPrayerNotifications();
+        setState(() {
+          _notificationsEnabled = true;
+          _isLoading = false;
+        });
+        final isUrdu = Provider.of<LanguageProvider>(context, listen: false).isUrdu;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(isUrdu 
+              ? 'اذان الرٹس فعال! اطلاعات مقرر ہوگئیں۔' 
+              : "Azan alerts enabled! Notifications scheduled.")),
+        );
+        await _saveNotificationPreference(true);
+      } catch (e) {
+        print("Error enabling notifications: $e");
+        setState(() => _isLoading = false);
+        final isUrdu = Provider.of<LanguageProvider>(context, listen: false).isUrdu;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(isUrdu 
+              ? 'اذان الرٹس فعال کرنے میں ناکامی: $e' 
+              : "Failed to enable Azan alerts: $e")),
+        );
+        // Reset switch state (it will stay off)
+        await _saveNotificationPreference(false);
+      }
     } else {
+      // Disable notifications
       await NotificationService.cancelAllNotifications();
       setState(() => _notificationsEnabled = false);
+      await _saveNotificationPreference(false);
+      final isUrdu = Provider.of<LanguageProvider>(context, listen: false).isUrdu;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(Provider.of<LanguageProvider>(context, listen: false).isUrdu 
+        SnackBar(content: Text(isUrdu 
             ? 'اذان الرٹس غیر فعال۔ تمام اطلاعات منسوخ کردی گئیں۔' 
             : "Azan alerts disabled. All notifications canceled.")),
       );
     }
-    await _saveNotificationPreference(value);
   }
 
   @override
@@ -139,7 +164,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       body: ListView(
         padding: EdgeInsets.all(16),
         children: [
-          // Dark mode switch card
           Card(
             elevation: 2,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -152,8 +176,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ),
           SizedBox(height: 16),
-
-          // Language selection card
           Card(
             elevation: 2,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -176,8 +198,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ),
           SizedBox(height: 16),
-
-          // Azan Alerts card (only this remains from the previous "Alarm/Reminder" card)
           Card(
             elevation: 2,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -195,8 +215,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ),
           SizedBox(height: 16),
-
-          // About section
           Card(
             elevation: 2,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),

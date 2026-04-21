@@ -52,5 +52,5 @@ flutter:
 
   # Assets folder (you'll add images/sounds later)
   assets:
-    - assets/azan_sounds/
+    # - assets/audio/azan.mp3
     - assets/hadiths.json

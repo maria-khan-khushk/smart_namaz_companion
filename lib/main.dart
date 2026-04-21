@@ -3,9 +3,15 @@ import 'package:provider/provider.dart';
 import 'providers/language_provider.dart';
 import 'utils/theme.dart';
 import 'screens/main_wrapper.dart';
+import 'services/notification_service.dart';   // ✅ Add this import
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Initialize notification service
+  await NotificationService.initialize();
+  await NotificationService.createNotificationChannel();
+
   runApp(MyApp());
 }
 
