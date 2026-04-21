@@ -267,6 +267,7 @@ class _HomeScreenState extends State<HomeScreen> {
   // Drawer - now uses direct variable, NO FutureBuilder, instantly opens
 Widget _buildDrawer(BuildContext context, bool isUrdu) {
   return Drawer(
+    backgroundColor: Colors.white, // ✅ Drawer background white
     child: ListView(
       padding: EdgeInsets.zero,
       children: [
