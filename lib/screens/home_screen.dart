@@ -26,8 +26,7 @@ class _HomeScreenState extends State<HomeScreen> {
   bool isFetchingFresh = false;
   String errorMsg = '';
   String nextPrayer = '';
-  
-  // Direct hadith object (no FutureBuilder needed)
+
   HadithModel? _todaysHadith;
 
   @override
@@ -37,18 +36,14 @@ class _HomeScreenState extends State<HomeScreen> {
     Future.delayed(Duration(milliseconds: 500), () {
       _fetchFreshTimes();
     });
-    
-    // Preload hadiths and load today's hadith into variable
     _loadHadithData();
-    
-    // Schedule daily Hadith notification
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _scheduleHadithNotification();
     });
   }
-  
+
   Future<void> _loadHadithData() async {
-    await HadithService.preload(); // ensure caching
+    await HadithService.preload();
     final hadith = await HadithService.getTodaysHadith();
     if (mounted) {
       setState(() {
@@ -56,7 +51,7 @@ class _HomeScreenState extends State<HomeScreen> {
       });
     }
   }
-  
+
   Future<void> _scheduleHadithNotification() async {
     try {
       await NotificationService.scheduleDailyHadithNotification(
@@ -186,10 +181,16 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     final isUrdu = Provider.of<LanguageProvider>(context).isUrdu;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final primaryColor = Theme.of(context).primaryColor;
+    final cardColor = Theme.of(context).cardColor;
+    final textPrimary = Theme.of(context).textTheme.bodyLarge?.color ?? Colors.black87;
+    final textSecondary = Theme.of(context).textTheme.bodyMedium?.color ?? Colors.black54;
+
     return Scaffold(
       drawer: _buildDrawer(context, isUrdu),
       body: Container(
-        color: Theme.of(context).brightness == Brightness.dark ? AppColors.darkBackground : Colors.white,
+        color: Theme.of(context).scaffoldBackgroundColor,
         child: SafeArea(
           child: Column(
             children: [
@@ -201,20 +202,20 @@ class _HomeScreenState extends State<HomeScreen> {
                   children: [
                     Builder(
                       builder: (context) => IconButton(
-                        icon: Icon(Icons.menu),
+                        icon: Icon(Icons.menu, color: primaryColor),
                         onPressed: () => Scaffold.of(context).openDrawer(),
                       ),
                     ),
                     Text(
                       isUrdu ? 'نماز کے اوقات' : 'Prayer Times',
-                      style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                      style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: textPrimary),
                     ),
                     GestureDetector(
                       onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => StreakTrackerScreen())),
                       child: Container(
                         padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                         decoration: BoxDecoration(
-                          color: AppColors.primaryMuted,
+                          color: primaryColor,
                           borderRadius: BorderRadius.circular(20),
                         ),
                         child: Icon(Icons.local_fire_department, color: Colors.white, size: 20),
@@ -223,11 +224,11 @@ class _HomeScreenState extends State<HomeScreen> {
                   ],
                 ),
               ),
-              if (prayerTimes != null) _buildNextPrayerCard(isUrdu),
+              if (prayerTimes != null) _buildNextPrayerCard(isUrdu, primaryColor),
               Expanded(
                 child: prayerTimes == null
                     ? Center(child: CircularProgressIndicator())
-                    : _buildPrayerTimesView(isUrdu),
+                    : _buildPrayerTimesView(isUrdu, primaryColor, cardColor, textPrimary, isDark),
               ),
             ],
           ),
@@ -236,14 +237,19 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildNextPrayerCard(bool isUrdu) {
+  Widget _buildNextPrayerCard(bool isUrdu, Color primaryColor) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    // For dark mode, use slightly darker gradient
+    final gradientColors = isDark
+        ? [primaryColor.withOpacity(0.8), primaryColor.withOpacity(0.6)]
+        : [AppColors.primaryMuted, AppColors.secondaryMuted];
     return Container(
       margin: EdgeInsets.fromLTRB(16, 8, 16, 8),
       padding: EdgeInsets.symmetric(vertical: 20, horizontal: 16),
       decoration: BoxDecoration(
-        gradient: LinearGradient(colors: [AppColors.primaryMuted, AppColors.secondaryMuted]),
+        gradient: LinearGradient(colors: gradientColors),
         borderRadius: BorderRadius.circular(40),
-        boxShadow: [BoxShadow(color: AppColors.primaryMuted.withOpacity(0.3), blurRadius: 12, offset: Offset(0, 6))],
+        boxShadow: [BoxShadow(color: primaryColor.withOpacity(0.3), blurRadius: 12, offset: Offset(0, 6))],
       ),
       child: Center(
         child: Column(
@@ -264,163 +270,168 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // Drawer - now uses direct variable, NO FutureBuilder, instantly opens
-Widget _buildDrawer(BuildContext context, bool isUrdu) {
-  return Drawer(
-    backgroundColor: Colors.white, // ✅ Drawer background white
-    child: ListView(
-      padding: EdgeInsets.zero,
-      children: [
-        DrawerHeader(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(colors: [AppColors.primaryMuted, AppColors.secondaryMuted]),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisAlignment: MainAxisAlignment.end,
-            children: [
-              Text(isUrdu ? 'اسمارٹ نماز' : 'Smart Namaz',
-                  style: TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
-              SizedBox(height: 4),
-              Text(isUrdu ? 'ساتھی' : 'Companion',
-                  style: TextStyle(color: Colors.white70, fontSize: 16)),
-            ],
-          ),
-        ),
-        // ---------- Islamic Calendar Card ----------
-        Card(
-          margin: EdgeInsets.all(12),
-          elevation: 4,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          child: Padding(
-            padding: EdgeInsets.all(16),
+  Widget _buildDrawer(BuildContext context, bool isUrdu) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final primaryColor = Theme.of(context).primaryColor;
+    final cardColor = Theme.of(context).cardColor;
+    final textPrimary = Theme.of(context).textTheme.bodyLarge?.color ?? Colors.black87;
+    final textSecondary = Theme.of(context).textTheme.bodyMedium?.color ?? Colors.black54;
+
+    return Drawer(
+      backgroundColor: isDark ? AppColors.darkSurface : Colors.white,
+      child: ListView(
+        padding: EdgeInsets.zero,
+        children: [
+          DrawerHeader(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(colors: isDark
+                  ? [primaryColor.withOpacity(0.8), primaryColor.withOpacity(0.6)]
+                  : [AppColors.primaryMuted, AppColors.secondaryMuted]),
+            ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.end,
               children: [
-                Row(
-                  children: [
-                    Icon(Icons.calendar_today, color: AppColors.primaryMuted, size: 24),
-                    SizedBox(width: 8),
-                    Text(
-                      isUrdu ? 'اسلامی کیلنڈر' : 'Islamic Calendar',
-                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.primaryMuted),
-                    ),
-                  ],
-                ),
-                SizedBox(height: 12),
-                Text(
-                  HijriService.getFormattedHijriDate(isUrdu),
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.w500),
-                ),
-                SizedBox(height: 8),
-                Text(
-                  isUrdu ? 'عیسوی تاریخ:' : 'Gregorian Date:',
-                  style: TextStyle(fontSize: 14, color: Colors.grey[600]),
-                ),
-                Text(
-                  HijriService.getGregorianDate(isUrdu),
-                  style: TextStyle(fontSize: 16),
-                ),
+                Text(isUrdu ? 'اسمارٹ نماز' : 'Smart Namaz',
+                    style: TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
+                SizedBox(height: 4),
+                Text(isUrdu ? 'ساتھی' : 'Companion',
+                    style: TextStyle(color: Colors.white70, fontSize: 16)),
               ],
             ),
           ),
-        ),
-        // ---------- Hadith Card ----------
-        _todaysHadith == null
-            ? Center(
-                child: Padding(
-                  padding: EdgeInsets.all(20),
-                  child: CircularProgressIndicator(),
-                ),
-              )
-            : _buildHadithCard(_todaysHadith!, isUrdu),
-        // ---------- Settings Option ----------
-        ListTile(
-          leading: Icon(Icons.settings, color: AppColors.primaryMuted),
-          title: Text(isUrdu ? 'سیٹنگز' : 'Settings'),
-          onTap: () {
-            Navigator.pop(context);
-            Navigator.push(context, MaterialPageRoute(builder: (_) => SettingsScreen()));
-          },
-        ),
-      ],
-    ),
-  );
-}
-
-// Helper method to build hadith card (already exists)
-Widget _buildHadithCard(HadithModel hadith, bool isUrdu) {
-  return Card(
-    margin: EdgeInsets.all(12),
-    elevation: 4,
-    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-    child: Padding(
-      padding: EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            isUrdu ? 'آج کی حدیث' : "Today's Hadith",
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.primaryMuted),
+          // Islamic Calendar Card
+          Card(
+            margin: EdgeInsets.all(12),
+            elevation: 4,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            color: cardColor,
+            child: Padding(
+              padding: EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.calendar_today, color: primaryColor, size: 24),
+                      SizedBox(width: 8),
+                      Text(
+                        isUrdu ? 'اسلامی کیلنڈر' : 'Islamic Calendar',
+                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: primaryColor),
+                      ),
+                    ],
+                  ),
+                  SizedBox(height: 12),
+                  Text(
+                    HijriService.getFormattedHijriDate(isUrdu),
+                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.w500, color: textPrimary),
+                  ),
+                  SizedBox(height: 8),
+                  Text(
+                    isUrdu ? 'عیسوی تاریخ:' : 'Gregorian Date:',
+                    style: TextStyle(fontSize: 14, color: textSecondary),
+                  ),
+                  Text(
+                    HijriService.getGregorianDate(isUrdu),
+                    style: TextStyle(fontSize: 16, color: textPrimary),
+                  ),
+                ],
+              ),
+            ),
           ),
-          SizedBox(height: 12),
-          Text(
-            hadith.arabic,
-            textAlign: TextAlign.right,
-            style: TextStyle(fontSize: 22, fontFamily: 'serif'),
-          ),
-          SizedBox(height: 12),
-          Text(
-            isUrdu ? hadith.urduText : hadith.englishText,
-            style: TextStyle(fontSize: 16, fontStyle: FontStyle.italic),
-          ),
-          SizedBox(height: 8),
-          Text(
-            isUrdu ? hadith.urduTranslation : hadith.englishTranslation,
-            style: TextStyle(fontSize: 14, color: Colors.grey[700]),
-          ),
-          SizedBox(height: 8),
-          Text(
-            isUrdu ? hadith.urduTafseer : hadith.englishTafseer,
-            style: TextStyle(fontSize: 14, color: Colors.grey[600]),
-          ),
-          SizedBox(height: 8),
-          Text(
-            hadith.reference,
-            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: AppColors.secondaryMuted),
+          // Hadith Card
+          _todaysHadith == null
+              ? Center(child: Padding(padding: EdgeInsets.all(20), child: CircularProgressIndicator()))
+              : _buildHadithCard(_todaysHadith!, isUrdu, primaryColor, cardColor, textPrimary, textSecondary),
+          // Settings
+          ListTile(
+            leading: Icon(Icons.settings, color: primaryColor),
+            title: Text(isUrdu ? 'سیٹنگز' : 'Settings', style: TextStyle(color: textPrimary)),
+            onTap: () {
+              Navigator.pop(context);
+              Navigator.push(context, MaterialPageRoute(builder: (_) => SettingsScreen()));
+            },
           ),
         ],
       ),
-    ),
-  );
-}
+    );
+  }
 
-  Widget _buildPrayerTimesView(bool isUrdu) {
+  Widget _buildHadithCard(HadithModel hadith, bool isUrdu, Color primaryColor, Color cardColor, Color textPrimary, Color textSecondary) {
+    return Card(
+      margin: EdgeInsets.all(12),
+      elevation: 4,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      color: cardColor,
+      child: Padding(
+        padding: EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              isUrdu ? 'آج کی حدیث' : "Today's Hadith",
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: primaryColor),
+            ),
+            SizedBox(height: 12),
+            Text(
+              hadith.arabic,
+              textAlign: TextAlign.right,
+              style: TextStyle(fontSize: 22, fontFamily: 'serif', color: textPrimary),
+            ),
+            SizedBox(height: 12),
+            Text(
+              isUrdu ? hadith.urduText : hadith.englishText,
+              style: TextStyle(fontSize: 16, fontStyle: FontStyle.italic, color: textPrimary),
+            ),
+            SizedBox(height: 8),
+            Text(
+              isUrdu ? hadith.urduTranslation : hadith.englishTranslation,
+              style: TextStyle(fontSize: 14, color: textSecondary),
+            ),
+            SizedBox(height: 8),
+            Text(
+              isUrdu ? hadith.urduTafseer : hadith.englishTafseer,
+              style: TextStyle(fontSize: 14, color: textSecondary),
+            ),
+            SizedBox(height: 8),
+            Text(
+              hadith.reference,
+              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: primaryColor),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPrayerTimesView(bool isUrdu, Color primaryColor, Color cardColor, Color textPrimary, bool isDark) {
     return ListView(
       padding: EdgeInsets.all(16),
       children: [
-        _prayerCard('Fajr', _formatTo12Hour(prayerTimes!.fajr), Icons.wb_twilight, isUrdu, nextPrayer == 'Fajr'),
-        _prayerCard('Dhuhr', _formatTo12Hour(prayerTimes!.dhuhr), Icons.wb_sunny, isUrdu, nextPrayer == 'Dhuhr'),
-        _prayerCard('Asr', _formatTo12Hour(prayerTimes!.asr), Icons.brightness_5, isUrdu, nextPrayer == 'Asr'),
-        _prayerCard('Maghrib', _formatTo12Hour(prayerTimes!.maghrib), Icons.nights_stay, isUrdu, nextPrayer == 'Maghrib'),
-        _prayerCard('Isha', _formatTo12Hour(prayerTimes!.isha), Icons.nightlight_round, isUrdu, nextPrayer == 'Isha'),
+        _prayerCard('Fajr', _formatTo12Hour(prayerTimes!.fajr), Icons.wb_twilight, isUrdu, nextPrayer == 'Fajr', primaryColor, cardColor, textPrimary, isDark),
+        _prayerCard('Dhuhr', _formatTo12Hour(prayerTimes!.dhuhr), Icons.wb_sunny, isUrdu, nextPrayer == 'Dhuhr', primaryColor, cardColor, textPrimary, isDark),
+        _prayerCard('Asr', _formatTo12Hour(prayerTimes!.asr), Icons.brightness_5, isUrdu, nextPrayer == 'Asr', primaryColor, cardColor, textPrimary, isDark),
+        _prayerCard('Maghrib', _formatTo12Hour(prayerTimes!.maghrib), Icons.nights_stay, isUrdu, nextPrayer == 'Maghrib', primaryColor, cardColor, textPrimary, isDark),
+        _prayerCard('Isha', _formatTo12Hour(prayerTimes!.isha), Icons.nightlight_round, isUrdu, nextPrayer == 'Isha', primaryColor, cardColor, textPrimary, isDark),
       ],
     );
   }
 
-  Widget _prayerCard(String name, String timeFormatted, IconData icon, bool isUrdu, bool isNext) {
+  Widget _prayerCard(String name, String timeFormatted, IconData icon, bool isUrdu, bool isNext,
+      Color primaryColor, Color cardColor, Color textPrimary, bool isDark) {
     return Card(
       margin: EdgeInsets.only(bottom: 12),
       elevation: isNext ? 4 : 2,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      color: cardColor,
       child: Container(
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(20),
-          color: isNext ? AppColors.accentMuted.withOpacity(0.3) : null,
+          color: isNext ? primaryColor.withOpacity(isDark ? 0.2 : 0.1) : null,
         ),
         child: ListTile(
           leading: CircleAvatar(
-            backgroundColor: AppColors.primaryMuted,
+            backgroundColor: primaryColor,
             child: Icon(icon, color: Colors.white),
           ),
           title: Text(
@@ -428,9 +439,10 @@ Widget _buildHadithCard(HadithModel hadith, bool isUrdu) {
             style: TextStyle(
               fontSize: 20,
               fontWeight: isNext ? FontWeight.bold : FontWeight.normal,
+              color: textPrimary,
             ),
           ),
-          trailing: Text(timeFormatted, style: TextStyle(fontSize: 20, fontWeight: FontWeight.w500)),
+          trailing: Text(timeFormatted, style: TextStyle(fontSize: 20, fontWeight: FontWeight.w500, color: textPrimary)),
           contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           onTap: () {
             Navigator.push(context, MaterialPageRoute(builder: (context) => PrayerGuidanceScreen(prayerName: name)));
@@ -439,4 +451,4 @@ Widget _buildHadithCard(HadithModel hadith, bool isUrdu) {
       ),
     );
   }
-} 
+}
