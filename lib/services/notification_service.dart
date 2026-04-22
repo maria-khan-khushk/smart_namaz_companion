@@ -37,7 +37,22 @@ class NotificationService {
     await _notifications.initialize(settings);
     print("Notification service initialized");
   }
-
+  
+static Future<void> scheduleManualReminder({
+  required int id,
+  required String title,
+  required String body,
+  required DateTime scheduledTime,
+  String? soundPath = 'azan',
+}) async {
+  await scheduleNotification(
+    id: id,
+    title: title,
+    body: body,
+    scheduledTime: scheduledTime,
+    soundPath: soundPath,
+  );
+}
   // Check if notifications are enabled (Android)
   static Future<bool> areNotificationsEnabled() async {
     final enabled = await _notifications
