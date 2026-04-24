@@ -3,7 +3,7 @@ import 'package:provider/provider.dart';
 import 'providers/language_provider.dart';
 import 'utils/theme.dart';
 import 'screens/main_wrapper.dart';
-import 'services/notification_service.dart';   // ✅ Add this import
+import 'services/notification_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();

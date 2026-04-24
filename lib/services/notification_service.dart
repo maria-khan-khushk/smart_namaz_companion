@@ -1,7 +1,8 @@
+import 'package:flutter/services.dart';
+import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/timezone.dart' as tz;
 import 'package:timezone/data/latest.dart' as tz;
-import 'package:audioplayers/audioplayers.dart';
 import '../services/hadith_service.dart';
 import '../providers/language_provider.dart';
 import 'package:provider/provider.dart';
@@ -12,16 +13,12 @@ class NotificationService {
       FlutterLocalNotificationsPlugin();
 
   static Future<void> initialize() async {
-    // Initialize timezone database (only once)
     if (!tz.timeZoneDatabase.isInitialized) {
       tz.initializeTimeZones();
     }
 
-    // Android settings
     const AndroidInitializationSettings androidSettings =
         AndroidInitializationSettings('@mipmap/ic_launcher');
-
-    // iOS settings
     const DarwinInitializationSettings iosSettings =
         DarwinInitializationSettings(
       requestAlertPermission: true,
@@ -34,26 +31,55 @@ class NotificationService {
       iOS: iosSettings,
     );
 
-    await _notifications.initialize(settings);
+    // Set callback when notification is tapped
+    await _notifications.initialize(
+      settings,
+      onDidReceiveNotificationResponse: _onNotificationTap,
+    );
+
     print("Notification service initialized");
   }
-  
-static Future<void> scheduleManualReminder({
-  required int id,
-  required String title,
-  required String body,
-  required DateTime scheduledTime,
-  String? soundPath = 'azan',
-}) async {
-  await scheduleNotification(
-    id: id,
-    title: title,
-    body: body,
-    scheduledTime: scheduledTime,
-    soundPath: soundPath,
-  );
-}
-  // Check if notifications are enabled (Android)
+
+  // Play Azan when user taps the notification
+  static Future<void> _onNotificationTap(NotificationResponse response) async {
+    print("Notification tapped: ${response.payload}");
+    final player = AudioPlayer();
+    try {
+      await player.play(AssetSource('sounds/azan.mp3'));
+      print("Playing Azan from assets");
+      // Stop after 30 seconds
+      Future.delayed(Duration(seconds: 30), () => player.stop());
+    } catch (e) {
+      print("Error playing Azan: $e");
+    }
+  }
+
+  static Future<void> testNotification() async {
+    await scheduleNotification(
+      id: 99999,
+      title: "Test Alarm",
+      body: "This is a test notification",
+      scheduledTime: DateTime.now().add(Duration(seconds: 10)),
+      soundPath: null, // default system sound
+    );
+  }
+
+  static Future<void> scheduleManualReminder({
+    required int id,
+    required String title,
+    required String body,
+    required DateTime scheduledTime,
+    String? soundPath,
+  }) async {
+    await scheduleNotification(
+      id: id,
+      title: title,
+      body: body,
+      scheduledTime: scheduledTime,
+      soundPath: soundPath,
+    );
+  }
+
   static Future<bool> areNotificationsEnabled() async {
     final enabled = await _notifications
         .resolvePlatformSpecificImplementation<
@@ -62,7 +88,6 @@ static Future<void> scheduleManualReminder({
     return enabled ?? true;
   }
 
-  // Create notification channel (Android)
   static Future<void> createNotificationChannel() async {
     const AndroidNotificationChannel channel = AndroidNotificationChannel(
       'azan_channel',
@@ -79,39 +104,34 @@ static Future<void> scheduleManualReminder({
     print("Notification channel created");
   }
 
-  // Schedule notification at specific time
   static Future<void> scheduleNotification({
     required int id,
     required String title,
     required String body,
     required DateTime scheduledTime,
-    String? soundPath, // e.g., 'azan' for raw resource
+    String? soundPath,
   }) async {
     try {
-      // Ensure timezone is initialized
       if (!tz.timeZoneDatabase.isInitialized) {
         tz.initializeTimeZones();
       }
 
-      // Create notification details
-      final AndroidNotificationDetails androidDetails =
-          AndroidNotificationDetails(
+      // Always use default system sound for reliability
+      final AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
         'azan_channel',
         'Azan Notifications',
         channelDescription: 'Prayer time notifications',
         importance: Importance.max,
         priority: Priority.high,
         playSound: true,
-        sound: soundPath != null
-            ? RawResourceAndroidNotificationSound(soundPath)
-            : null,
+        sound: null, // default sound
         enableVibration: true,
         fullScreenIntent: true,
         styleInformation: BigTextStyleInformation(body),
       );
 
       final DarwinNotificationDetails iosDetails = DarwinNotificationDetails(
-        sound: soundPath != null ? '$soundPath.caf' : null,
+        sound: null,
         presentAlert: true,
         presentSound: true,
         presentBadge: true,
@@ -122,7 +142,6 @@ static Future<void> scheduleManualReminder({
         iOS: iosDetails,
       );
 
-      // Convert to TZDateTime
       final tz.TZDateTime tzScheduledTime =
           tz.TZDateTime.from(scheduledTime, tz.local);
 
@@ -135,6 +154,7 @@ static Future<void> scheduleManualReminder({
         androidAllowWhileIdle: true,
         uiLocalNotificationDateInterpretation:
             UILocalNotificationDateInterpretation.absoluteTime,
+        payload: 'azan_reminder', // optional payload
       );
 
       print("Notification scheduled: id=$id, title=$title, time=$scheduledTime");
@@ -144,34 +164,17 @@ static Future<void> scheduleManualReminder({
     }
   }
 
-  // // Play Azan sound using audioplayers (for foreground/background)
-  // static Future<void> playAzanSound() async {
-  //   final AudioPlayer player = AudioPlayer();
-  //   try {
-  //     await player.play(AssetSource('azan.mp3'));
-  //     // Stop after 30 seconds
-  //     Future.delayed(Duration(seconds: 30), () {
-  //       player.stop();
-  //     });
-  //   } catch (e) {
-  //     print('Error playing Azan: $e');
-  //   }
-  // }
-
-  // Cancel a specific notification
   static Future<void> cancelNotification(int id) async {
     await _notifications.cancel(id);
     print("Notification cancelled: id=$id");
   }
 
-  // Cancel all notifications
   static Future<void> cancelAllNotifications() async {
     await _notifications.cancelAll();
     print("All notifications cancelled");
   }
 
-  // ==================== HADITH NOTIFICATION METHODS ====================
-
+  // HADITH NOTIFICATIONS (same as before, but without custom sound)
   static Future<void> scheduleDailyHadithNotification({
     required BuildContext context,
     int hour = 8,

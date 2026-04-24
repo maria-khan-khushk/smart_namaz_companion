@@ -72,7 +72,6 @@ class _RemindersScreenState extends State<RemindersScreen> {
     setState(() => _selectedTime = picked);
 
     // Title selection dialog
-    String? customTitle;
     final selectedTitle = await showDialog<String>(
       context: context,
       builder: (context) {
@@ -155,7 +154,7 @@ class _RemindersScreenState extends State<RemindersScreen> {
           ? 'اذان کا وقت ہوگیا ہے'
           : 'Time for Azan',
       scheduledTime: scheduledDateTime,
-      soundPath: 'azan',
+      soundPath: null,
     );
 
     final newReminder = {
@@ -205,6 +204,7 @@ class _RemindersScreenState extends State<RemindersScreen> {
         title: Text(isUrdu ? 'دستی یاد دہانیاں' : 'Manual Reminders'),
         backgroundColor: Theme.of(context).primaryColor,
         foregroundColor: Colors.white,
+        // No actions – test button removed
       ),
       body: Column(
         children: [
