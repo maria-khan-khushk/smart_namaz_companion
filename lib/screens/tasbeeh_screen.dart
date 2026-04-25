@@ -60,7 +60,7 @@ class _TasbeehScreenState extends State<TasbeehScreen> {
                 setState(() {
                   _target = newTarget;
                   if (_counter > _target) _counter = _target;
-                  _targetReachedShown = _counter == _target;
+                  _targetReachedShown = (_counter == _target);
                 });
               }
               Navigator.pop(context);

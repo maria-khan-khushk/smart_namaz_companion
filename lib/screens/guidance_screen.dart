@@ -82,7 +82,7 @@ class GuidanceScreen extends StatelessWidget {
       'urdu': 'میں اللہ عظیم سے مغفرت طلب کرتا ہوں جس کے سوا کوئی معبود نہیں، وہ زندہ اور قائم ہے، اور میں اسی کی طرف توبہ کرتا ہوں۔',
       'reference': 'Tirmidhī 3577',
     },
-    // 12. Dua of the Grief-stricken Prophet Yunus (same as 10 but repeated as per user)
+    // 12. Dua of the Grief-stricken Prophet Yunus (same as #10 but included as separate per user)
     {
       'arabic': 'لَا إِلَٰهَ إِلَّا أَنْتَ سُبْحَانَكَ إِنِّي كُنْتُ مِنَ الظَّالِمِينَ',
       'english': 'Lā ilāha illā Anta subḥānaka innī kuntu mina-ẓ-ẓālimīn.',
