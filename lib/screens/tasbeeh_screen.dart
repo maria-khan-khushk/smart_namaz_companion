@@ -2,56 +2,92 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/language_provider.dart';
 import '../utils/theme.dart';
-import 'dart:math';
+import 'guidance_screen.dart';
 
 class TasbeehScreen extends StatefulWidget {
   @override
   _TasbeehScreenState createState() => _TasbeehScreenState();
 }
 
-class _TasbeehScreenState extends State<TasbeehScreen> with SingleTickerProviderStateMixin {
-  int _currentBead = 0; // 0 to 32
-  int _completeSets = 0; // each full cycle of 33 beads
-  late AnimationController _animationController;
-  late Animation<double> _scaleAnimation;
+class _TasbeehScreenState extends State<TasbeehScreen> {
+  int _counter = 0;
+  int _target = 33;
+  bool _targetReachedShown = false;
 
-  // Dhikr list for each bead (cycle repeats after 33)
-  final List<Map<String, String>> _dhikrList = [
-    {'arabic': 'سُبْحَانَ اللَّهِ', 'english': 'Glory be to Allah', 'urdu': 'اللہ پاک ہے'},
-    {'arabic': 'الْحَمْدُ لِلَّهِ', 'english': 'Praise be to Allah', 'urdu': 'تمام تعریفیں اللہ کے لیے ہیں'},
-    {'arabic': 'اللَّهُ أَكْبَرُ', 'english': 'Allah is the Greatest', 'urdu': 'اللہ سب سے بڑا ہے'},
-  ];
-  // cycle: 33 times (11 of each, simple loop)
-  int get currentDhikrIndex => (_currentBead % 3);
-
-  @override
-  void initState() {
-    super.initState();
-    _animationController = AnimationController(
-      vsync: this,
-      duration: Duration(milliseconds: 150),
-    );
-    _scaleAnimation = Tween<double>(begin: 1.0, end: 1.2).animate(_animationController);
-  }
-
-  void _moveBead() {
-    setState(() {
-      if (_currentBead < 32) {
-        _currentBead++;
-      } else {
-        _currentBead = 0;
-        _completeSets++;
-      }
-    });
-    // trigger animation
-    _animationController.forward().then((_) => _animationController.reverse());
+  void _increment() {
+    if (_counter < _target) {
+      setState(() {
+        _counter++;
+        if (_counter == _target && !_targetReachedShown) {
+          _targetReachedShown = true;
+          _showTargetCompletion();
+        }
+      });
+    }
   }
 
   void _reset() {
     setState(() {
-      _currentBead = 0;
-      _completeSets = 0;
+      _counter = 0;
+      _targetReachedShown = false;
     });
+  }
+
+  void _setTarget() async {
+    final isUrdu = Provider.of<LanguageProvider>(context, listen: false).isUrdu;
+    final controller = TextEditingController(text: _target.toString());
+    await showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(isUrdu ? 'حد مقرر کریں' : 'Set Target'),
+        content: TextField(
+          controller: controller,
+          keyboardType: TextInputType.number,
+          decoration: InputDecoration(
+            hintText: isUrdu ? 'مطلوبہ تعداد' : 'Enter count',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(isUrdu ? 'منسوخ' : 'Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              final newTarget = int.tryParse(controller.text);
+              if (newTarget != null && newTarget > 0) {
+                setState(() {
+                  _target = newTarget;
+                  if (_counter > _target) _counter = _target;
+                  _targetReachedShown = _counter == _target;
+                });
+              }
+              Navigator.pop(context);
+            },
+            child: Text(isUrdu ? 'محفوظ' : 'Save'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showTargetCompletion() {
+    final isUrdu = Provider.of<LanguageProvider>(context, listen: false).isUrdu;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          isUrdu ? '🎉 مبارک ہو! آپ نے اپنی حد مکمل کر لی!' : '🎉 Congratulations! You have reached your target!',
+        ),
+        duration: Duration(seconds: 3),
+        backgroundColor: Colors.green,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  void _openGuidance() {
+    Navigator.push(context, MaterialPageRoute(builder: (_) => GuidanceScreen()));
   }
 
   @override
@@ -59,182 +95,132 @@ class _TasbeehScreenState extends State<TasbeehScreen> with SingleTickerProvider
     final isUrdu = Provider.of<LanguageProvider>(context).isUrdu;
     final primaryColor = Theme.of(context).primaryColor;
     final cardColor = Theme.of(context).cardColor;
-    final textPrimary = Theme.of(context).textTheme.bodyLarge?.color ?? Colors.black87;
     final textSecondary = Theme.of(context).textTheme.bodyMedium?.color ?? Colors.black54;
 
-    final currentDhikr = _dhikrList[currentDhikrIndex];
-    final dhikrText = currentDhikr['arabic']!;
-    final translation = isUrdu ? currentDhikr['urdu']! : currentDhikr['english']!;
+    final progress = _counter / _target;
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(isUrdu ? 'تسبیح' : 'Tasbeeh'),
+        title: Text(isUrdu ? 'تسبیح کاؤنٹر' : 'Tasbeeh Counter'),
         backgroundColor: primaryColor,
         foregroundColor: Colors.white,
+        actions: [
+          IconButton(
+            icon: Icon(Icons.book),
+            onPressed: _openGuidance,
+            tooltip: isUrdu ? 'اذکار اور دعائیں' : 'Dhikr & Duas',
+          ),
+        ],
       ),
-      body: SingleChildScrollView(
+      body: Center(
         child: Padding(
-          padding: const EdgeInsets.all(16.0),
+          padding: const EdgeInsets.all(24.0),
           child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              // Digital counter display
               Card(
-                elevation: 4,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                elevation: 12,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(40)),
                 color: cardColor,
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 12),
+                  padding: const EdgeInsets.symmetric(vertical: 48, horizontal: 24),
                   child: Column(
                     children: [
                       Text(
-                        isUrdu ? 'مجموعی گنتی' : 'Total Count',
-                        style: TextStyle(fontSize: 16, color: textSecondary),
+                        isUrdu ? 'موجودہ گنتی' : 'Current Count',
+                        style: TextStyle(fontSize: 18, color: textSecondary),
                       ),
+                      const SizedBox(height: 16),
                       Text(
-                        '${(_completeSets * 33) + _currentBead}',
-                        style: TextStyle(fontSize: 48, fontWeight: FontWeight.bold, color: primaryColor),
+                        '$_counter',
+                        style: TextStyle(fontSize: 96, fontWeight: FontWeight.bold, color: primaryColor),
                       ),
-                      Text(
-                        isUrdu ? 'مکمل دور: $_completeSets' : 'Full Cycles: $_completeSets',
-                        style: TextStyle(fontSize: 14, color: textSecondary),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              SizedBox(height: 20),
-
-              // Tasbeeh visual - beads on a string
-              Container(
-                padding: EdgeInsets.symmetric(vertical: 20),
-                child: Column(
-                  children: [
-                    // Main bead (central controller)
-                    GestureDetector(
-                      onTap: _moveBead,
-                      child: AnimatedBuilder(
-                        animation: _scaleAnimation,
-                        builder: (context, child) {
-                          return Transform.scale(
-                            scale: _scaleAnimation.value,
+                      const SizedBox(height: 16),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            isUrdu ? 'حد: ' : 'Target: ',
+                            style: TextStyle(fontSize: 18, color: textSecondary),
+                          ),
+                          GestureDetector(
+                            onTap: _setTarget,
                             child: Container(
-                              width: 70,
-                              height: 70,
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                               decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                gradient: LinearGradient(
-                                  colors: [primaryColor, primaryColor.withOpacity(0.7)],
-                                  begin: Alignment.topLeft,
-                                  end: Alignment.bottomRight,
-                                ),
-                                boxShadow: [
-                                  BoxShadow(color: primaryColor.withOpacity(0.4), blurRadius: 8, offset: Offset(0, 3))
+                                color: primaryColor.withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(20),
+                                border: Border.all(color: primaryColor.withOpacity(0.3)),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    '$_target',
+                                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: primaryColor),
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Icon(Icons.edit, size: 16, color: primaryColor),
                                 ],
                               ),
-                              child: Center(
-                                child: Icon(Icons.touch_app, color: Colors.white, size: 32),
-                              ),
                             ),
-                          );
-                        },
+                          ),
+                        ],
                       ),
-                    ),
-                    SizedBox(height: 10),
-                    Text(
-                      isUrdu ? 'تسبیح دانے کو چھوئیں' : 'Tap the bead to count',
-                      style: TextStyle(fontSize: 14, color: textSecondary),
-                    ),
-                    SizedBox(height: 20),
-
-                    // Bead row (string)
-                    SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: Row(
-                        children: List.generate(33, (index) {
-                          bool isActive = index <= _currentBead;
-                          return Container(
-                            margin: EdgeInsets.symmetric(horizontal: 4),
-                            child: Column(
-                              children: [
-                                Container(
-                                  width: 20,
-                                  height: 20,
-                                  decoration: BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    color: isActive ? primaryColor : Colors.grey[400],
-                                    boxShadow: isActive ? [BoxShadow(color: primaryColor.withOpacity(0.5), blurRadius: 3)] : null,
-                                  ),
-                                ),
-                                if (index == 10 || index == 21) // separator beads (optional)
-                                  Container(
-                                    width: 2,
-                                    height: 6,
-                                    color: Colors.grey,
-                                  ),
-                              ],
-                            ),
-                          );
-                        }),
+                      const SizedBox(height: 24),
+                      LinearProgressIndicator(
+                        value: progress,
+                        backgroundColor: Colors.grey[300],
+                        color: primaryColor,
+                        minHeight: 12,
+                        borderRadius: BorderRadius.circular(12),
                       ),
-                    ),
-                  ],
-                ),
-              ),
-              SizedBox(height: 20),
-
-              // Dhikr display with translation
-              Card(
-                elevation: 3,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-                color: cardColor,
-                child: Padding(
-                  padding: const EdgeInsets.all(20),
-                  child: Column(
-                    children: [
+                      const SizedBox(height: 12),
                       Text(
-                        dhikrText,
-                        style: TextStyle(fontSize: 32, fontFamily: 'serif', color: textPrimary),
-                        textAlign: TextAlign.center,
-                      ),
-                      SizedBox(height: 12),
-                      Text(
-                        translation,
-                        style: TextStyle(fontSize: 18, color: primaryColor, fontWeight: FontWeight.w500),
-                        textAlign: TextAlign.center,
-                      ),
-                      SizedBox(height: 8),
-                      Text(
-                        isUrdu ? 'یہ تسبیح ہر بار پڑھیں' : 'Recite this dhikr each time',
-                        style: TextStyle(fontSize: 14, color: textSecondary),
+                        '${(progress * 100).toStringAsFixed(0)}%',
+                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500, color: textSecondary),
                       ),
                     ],
                   ),
                 ),
               ),
-              SizedBox(height: 20),
-
-              // Reset button
-              ElevatedButton.icon(
-                onPressed: _reset,
-                icon: Icon(Icons.refresh),
-                label: Text(isUrdu ? 'دوبارہ شروع کریں' : 'Reset'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.redAccent,
-                  foregroundColor: Colors.white,
-                  padding: EdgeInsets.symmetric(horizontal: 32, vertical: 12),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                ),
+              const SizedBox(height: 48),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  ElevatedButton.icon(
+                    onPressed: _reset,
+                    icon: Icon(Icons.refresh),
+                    label: Text(isUrdu ? 'ری سیٹ' : 'Reset'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.grey,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                    ),
+                  ),
+                  ElevatedButton.icon(
+                    onPressed: _increment,
+                    icon: Icon(Icons.add),
+                    label: Text(isUrdu ? 'ایک بڑھائیں' : 'Add One'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: primaryColor,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 24),
+              Text(
+                isUrdu ? 'حد مقرر کرنے کے لیے "عدد" پر ٹیپ کریں' : 'Tap the target number to change limit',
+                style: TextStyle(fontSize: 12, color: textSecondary),
               ),
             ],
           ),
         ),
       ),
     );
-  }
-
-  @override
-  void dispose() {
-    _animationController.dispose();
-    super.dispose();
   }
 }
