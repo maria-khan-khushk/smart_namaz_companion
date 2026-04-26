@@ -106,7 +106,7 @@ class _TasbeehScreenState extends State<TasbeehScreen> {
         foregroundColor: Colors.white,
         actions: [
           IconButton(
-            icon: Icon(Icons.book),
+            icon: Text('🤲', style: TextStyle(fontSize: 24)), // 👐 dua hands emoji
             onPressed: _openGuidance,
             tooltip: isUrdu ? 'اذکار اور دعائیں' : 'Dhikr & Duas',
           ),
