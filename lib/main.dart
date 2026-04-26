@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:android_alarm_manager_plus/android_alarm_manager_plus.dart';
 import 'providers/language_provider.dart';
 import 'utils/theme.dart';
 import 'screens/main_wrapper.dart';
@@ -8,7 +9,7 @@ import 'services/notification_service.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Initialize notification service
+  await AndroidAlarmManager.initialize();
   await NotificationService.initialize();
   await NotificationService.createNotificationChannel();
 

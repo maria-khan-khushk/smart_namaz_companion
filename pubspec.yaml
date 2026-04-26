@@ -8,49 +8,51 @@ environment:
   sdk: ^3.10.8
 
 dependencies:
-  hijri_date: ^1.0.1   # Islamic calendar package
-  table_calendar: ^3.0.9
   flutter:
     sdk: flutter
-  path_provider: ^2.1.0
-  # UI & Icons
-  cupertino_icons: ^1.0.8
-  flutter_svg: ^2.0.9
 
-  # Location & Permissions
-  geolocator: ^10.1.0
+  # ========== UI & Icons ==========
+  cupertino_icons: ^1.0.8          # iOS style icons
+  flutter_svg: ^2.0.9              # SVG images support (if needed later)
 
-  timezone: ^0.9.4                        # timezone handling ke liye
+  # ========== Islamic Calendar ==========
+  hijri_date: ^1.0.1               # Islamic (Hijri) date calculation
+  table_calendar: ^3.0.9           # Calendar widget for Streak Tracker
 
-  http: ^1.1.0
+  # ========== Location & Compass (Qibla Direction) ==========
+  sensors_plus: ^6.0.1 
+  geolocator: ^13.0.2              # Get user's current GPS location (latitude/longitude)
+  permission_handler: ^11.3.1      # Request location permission (Android/iOS)
+  # flutter_compass: ^0.8.1       # Get device's compass heading (phone orientation)
+  # flutter_qiblah: ^3.1.0           # Calculate Qibla direction based on location
 
+  # ========== Networking & API ==========
+  http: ^1.1.0                     # Fetch prayer times from Aladhan API
+
+  # ========== Local Storage ==========
+  shared_preferences: ^2.2.2       # Save user preferences (notifications, theme, streak)
+  path_provider: ^2.1.0            # Get temporary/cache directory (for sound files)
+
+  # ========== Notifications & Azan Sound ==========
+  flutter_local_notifications: ^17.2.1   # Schedule and display Azan notifications
+  audioplayers: ^5.2.1             # Play Azan sound when notification is tapped
+  android_alarm_manager_plus: ^3.0.4
   
+  # ========== Date, Time & Timezone ==========
+  timezone: ^0.9.4                 # Handle timezone for scheduled notifications
+  intl: ^0.18.1                    # Format dates, times, and 12-hour conversion
 
-  # Local Storage
-  shared_preferences: ^2.2.2
-
-  # Notifications & Audio
-  flutter_local_notifications: ^17.2.1
-  audioplayers: ^5.2.1
-
-  # Qibla Compass (corrected package name)
-  flutter_compass: ^0.8.1
-
-  # Date/Time formatting
-  intl: ^0.18.1
-
-  # State Management
-  provider: ^6.0.5
+  # ========== State Management ==========
+  provider: ^6.0.5                 # Manage app-wide state (theme, language)
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  flutter_lints: ^6.0.0
+  flutter_lints: ^6.0.0            # Code style and linting rules
 
 flutter:
   uses-material-design: true
 
-  # Assets folder (you'll add images/sounds later)
   assets:
-    - assets/sounds/azan.mp3
-    - assets/hadiths.json
+    - assets/sounds/azan.mp3       # Azan sound file (for manual playback)
+    - assets/hadiths.json          # Daily hadith data
