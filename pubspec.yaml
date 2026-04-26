@@ -36,7 +36,7 @@ dependencies:
   # ========== Notifications & Azan Sound ==========
   flutter_local_notifications: ^17.2.1   # Schedule and display Azan notifications
   audioplayers: ^5.2.1             # Play Azan sound when notification is tapped
-  android_alarm_manager_plus: ^3.0.4
+  android_alarm_manager_plus: ^4.0.3
   
   # ========== Date, Time & Timezone ==========
   timezone: ^0.9.4                 # Handle timezone for scheduled notifications

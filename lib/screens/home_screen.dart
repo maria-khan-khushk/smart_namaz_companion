@@ -16,110 +16,6 @@ import '../models/hadith_model.dart';
 import '../services/notification_service.dart';
 import '../services/hijri_service.dart';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 99 Names of Allah (Arabic + English + Urdu)
-// ─────────────────────────────────────────────────────────────────────────────
-const List<Map<String, String>> _allahNames = [
-  {'arabic': 'الرَّحْمَنُ', 'english': 'The Most Gracious', 'urdu': 'بہت مہربان'},
-  {'arabic': 'الرَّحِيمُ', 'english': 'The Most Merciful', 'urdu': 'نہایت رحم کرنے والا'},
-  {'arabic': 'الْمَلِكُ', 'english': 'The King', 'urdu': 'بادشاہ'},
-  {'arabic': 'الْقُدُّوسُ', 'english': 'The Most Holy', 'urdu': 'پاک'},
-  {'arabic': 'السَّلَامُ', 'english': 'The Source of Peace', 'urdu': 'سلامتی دینے والا'},
-  {'arabic': 'الْمُؤْمِنُ', 'english': 'The Granter of Security', 'urdu': 'امن دینے والا'},
-  {'arabic': 'الْمُهَيْمِنُ', 'english': 'The Guardian', 'urdu': 'نگہبان'},
-  {'arabic': 'الْعَزِيزُ', 'english': 'The Almighty', 'urdu': 'سب پر غالب'},
-  {'arabic': 'الْجَبَّارُ', 'english': 'The Compeller', 'urdu': 'زبردست'},
-  {'arabic': 'الْمُتَكَبِّرُ', 'english': 'The Supreme', 'urdu': 'بڑائی والا'},
-  {'arabic': 'الْخَالِقُ', 'english': 'The Creator', 'urdu': 'پیدا کرنے والا'},
-  {'arabic': 'الْبَارِئُ', 'english': 'The Originator', 'urdu': 'بنانے والا'},
-  {'arabic': 'الْمُصَوِّرُ', 'english': 'The Fashioner', 'urdu': 'صورت دینے والا'},
-  {'arabic': 'الْغَفَّارُ', 'english': 'The Forgiving', 'urdu': 'بہت بخشنے والا'},
-  {'arabic': 'الْقَهَّارُ', 'english': 'The Subduer', 'urdu': 'قہر کرنے والا'},
-  {'arabic': 'الْوَهَّابُ', 'english': 'The Bestower', 'urdu': 'عطا کرنے والا'},
-  {'arabic': 'الرَّزَّاقُ', 'english': 'The Provider', 'urdu': 'رزق دینے والا'},
-  {'arabic': 'الْفَتَّاحُ', 'english': 'The Opener', 'urdu': 'کھولنے والا'},
-  {'arabic': 'الْعَلِيمُ', 'english': 'The All-Knowing', 'urdu': 'سب جاننے والا'},
-  {'arabic': 'الْقَابِضُ', 'english': 'The Restrainer', 'urdu': 'روکنے والا'},
-  {'arabic': 'الْبَاسِطُ', 'english': 'The Extender', 'urdu': 'پھیلانے والا'},
-  {'arabic': 'الْخَافِضُ', 'english': 'The Reducer', 'urdu': 'نیچے کرنے والا'},
-  {'arabic': 'الرَّافِعُ', 'english': 'The Exalter', 'urdu': 'اونچا کرنے والا'},
-  {'arabic': 'الْمُعِزُّ', 'english': 'The Honourer', 'urdu': 'عزت دینے والا'},
-  {'arabic': 'الْمُذِلُّ', 'english': 'The Humiliator', 'urdu': 'ذلیل کرنے والا'},
-  {'arabic': 'السَّمِيعُ', 'english': 'The All-Hearing', 'urdu': 'سننے والا'},
-  {'arabic': 'الْبَصِيرُ', 'english': 'The All-Seeing', 'urdu': 'دیکھنے والا'},
-  {'arabic': 'الْحَكَمُ', 'english': 'The Judge', 'urdu': 'فیصلہ کرنے والا'},
-  {'arabic': 'الْعَدْلُ', 'english': 'The Just', 'urdu': 'انصاف کرنے والا'},
-  {'arabic': 'اللَّطِيفُ', 'english': 'The Subtle One', 'urdu': 'باریک بین'},
-  {'arabic': 'الْخَبِيرُ', 'english': 'The All-Aware', 'urdu': 'باخبر'},
-  {'arabic': 'الْحَلِيمُ', 'english': 'The Forbearing', 'urdu': 'بردبار'},
-  {'arabic': 'الْعَظِيمُ', 'english': 'The Magnificent', 'urdu': 'عظمت والا'},
-  {'arabic': 'الْغَفُورُ', 'english': 'The Forgiving', 'urdu': 'معاف کرنے والا'},
-  {'arabic': 'الشَّكُورُ', 'english': 'The Appreciative', 'urdu': 'قدردان'},
-  {'arabic': 'الْعَلِيُّ', 'english': 'The Most High', 'urdu': 'سب سے بلند'},
-  {'arabic': 'الْكَبِيرُ', 'english': 'The Most Great', 'urdu': 'بہت بڑا'},
-  {'arabic': 'الْحَفِيظُ', 'english': 'The Preserver', 'urdu': 'حفاظت کرنے والا'},
-  {'arabic': 'الْمُقِيتُ', 'english': 'The Sustainer', 'urdu': 'قوت دینے والا'},
-  {'arabic': 'الْحَسِيبُ', 'english': 'The Reckoner', 'urdu': 'حساب لینے والا'},
-  {'arabic': 'الْجَلِيلُ', 'english': 'The Majestic', 'urdu': 'جلال والا'},
-  {'arabic': 'الْكَرِيمُ', 'english': 'The Most Generous', 'urdu': 'بہت کریم'},
-  {'arabic': 'الرَّقِيبُ', 'english': 'The Watchful', 'urdu': 'نگرانی کرنے والا'},
-  {'arabic': 'الْمُجِيبُ', 'english': 'The Responsive', 'urdu': 'قبول کرنے والا'},
-  {'arabic': 'الْوَاسِعُ', 'english': 'The All-Encompassing', 'urdu': 'وسعت والا'},
-  {'arabic': 'الْحَكِيمُ', 'english': 'The Wise', 'urdu': 'حکمت والا'},
-  {'arabic': 'الْوَدُودُ', 'english': 'The Loving', 'urdu': 'محبت کرنے والا'},
-  {'arabic': 'الْمَجِيدُ', 'english': 'The Glorious', 'urdu': 'بزرگی والا'},
-  {'arabic': 'الْبَاعِثُ', 'english': 'The Resurrector', 'urdu': 'اٹھانے والا'},
-  {'arabic': 'الشَّهِيدُ', 'english': 'The Witness', 'urdu': 'گواہ'},
-  {'arabic': 'الْحَقُّ', 'english': 'The Truth', 'urdu': 'سچا'},
-  {'arabic': 'الْوَكِيلُ', 'english': 'The Trustee', 'urdu': 'وکیل'},
-  {'arabic': 'الْقَوِيُّ', 'english': 'The Strong', 'urdu': 'طاقتور'},
-  {'arabic': 'الْمَتِينُ', 'english': 'The Firm', 'urdu': 'مضبوط'},
-  {'arabic': 'الْوَلِيُّ', 'english': 'The Protecting Friend', 'urdu': 'دوست'},
-  {'arabic': 'الْحَمِيدُ', 'english': 'The Praiseworthy', 'urdu': 'تعریف کے لائق'},
-  {'arabic': 'الْمُحْصِي', 'english': 'The Counter', 'urdu': 'گننے والا'},
-  {'arabic': 'الْمُبْدِئُ', 'english': 'The Originator', 'urdu': 'شروع کرنے والا'},
-  {'arabic': 'الْمُعِيدُ', 'english': 'The Restorer', 'urdu': 'واپس کرنے والا'},
-  {'arabic': 'الْمُحْيِي', 'english': 'The Giver of Life', 'urdu': 'زندگی دینے والا'},
-  {'arabic': 'الْمُمِيتُ', 'english': 'The Taker of Life', 'urdu': 'موت دینے والا'},
-  {'arabic': 'الْحَيُّ', 'english': 'The Ever-Living', 'urdu': 'ہمیشہ زندہ'},
-  {'arabic': 'الْقَيُّومُ', 'english': 'The Sustainer', 'urdu': 'قائم رکھنے والا'},
-  {'arabic': 'الْوَاجِدُ', 'english': 'The Finder', 'urdu': 'پانے والا'},
-  {'arabic': 'الْمَاجِدُ', 'english': 'The Noble', 'urdu': 'شریف'},
-  {'arabic': 'الْوَاحِدُ', 'english': 'The One', 'urdu': 'اکیلا'},
-  {'arabic': 'الْأَحَدُ', 'english': 'The Unique', 'urdu': 'یکتا'},
-  {'arabic': 'الصَّمَدُ', 'english': 'The Eternal', 'urdu': 'بے نیاز'},
-  {'arabic': 'الْقَادِرُ', 'english': 'The Able', 'urdu': 'قدرت والا'},
-  {'arabic': 'الْمُقْتَدِرُ', 'english': 'The Powerful', 'urdu': 'بہت قادر'},
-  {'arabic': 'الْمُقَدِّمُ', 'english': 'The Expediter', 'urdu': 'آگے کرنے والا'},
-  {'arabic': 'الْمُؤَخِّرُ', 'english': 'The Delayer', 'urdu': 'پیچھے کرنے والا'},
-  {'arabic': 'الْأَوَّلُ', 'english': 'The First', 'urdu': 'پہلا'},
-  {'arabic': 'الْآخِرُ', 'english': 'The Last', 'urdu': 'آخری'},
-  {'arabic': 'الظَّاهِرُ', 'english': 'The Manifest', 'urdu': 'ظاہر'},
-  {'arabic': 'الْبَاطِنُ', 'english': 'The Hidden', 'urdu': 'پوشیدہ'},
-  {'arabic': 'الْوَالِي', 'english': 'The Governor', 'urdu': 'حاکم'},
-  {'arabic': 'الْمُتَعَالِي', 'english': 'The Most Exalted', 'urdu': 'سب سے اعلیٰ'},
-  {'arabic': 'الْبَرُّ', 'english': 'The Source of Goodness', 'urdu': 'نیکی کا سرچشمہ'},
-  {'arabic': 'التَّوَّابُ', 'english': 'The Acceptor of Repentance', 'urdu': 'توبہ قبول کرنے والا'},
-  {'arabic': 'الْمُنْتَقِمُ', 'english': 'The Avenger', 'urdu': 'بدلہ لینے والا'},
-  {'arabic': 'الْعَفُوُّ', 'english': 'The Pardoner', 'urdu': 'معاف کرنے والا'},
-  {'arabic': 'الرَّؤُوفُ', 'english': 'The Most Kind', 'urdu': 'شفقت کرنے والا'},
-  {'arabic': 'مَالِكُ الْمُلْكِ', 'english': 'Owner of Sovereignty', 'urdu': 'بادشاہی کا مالک'},
-  {'arabic': 'ذُو الْجَلَالِ وَالْإِكْرَامِ', 'english': 'Lord of Majesty', 'urdu': 'جلال و اکرام والا'},
-  {'arabic': 'الْمُقْسِطُ', 'english': 'The Equitable', 'urdu': 'انصاف دینے والا'},
-  {'arabic': 'الْجَامِعُ', 'english': 'The Gatherer', 'urdu': 'اکٹھا کرنے والا'},
-  {'arabic': 'الْغَنِيُّ', 'english': 'The Self-Sufficient', 'urdu': 'بے پرواہ'},
-  {'arabic': 'الْمُغْنِي', 'english': 'The Enricher', 'urdu': 'مالدار بنانے والا'},
-  {'arabic': 'الْمَانِعُ', 'english': 'The Withholder', 'urdu': 'روکنے والا'},
-  {'arabic': 'الضَّارُّ', 'english': 'The Distresser', 'urdu': 'نقصان دینے والا'},
-  {'arabic': 'النَّافِعُ', 'english': 'The Benefiter', 'urdu': 'فائدہ دینے والا'},
-  {'arabic': 'النُّورُ', 'english': 'The Light', 'urdu': 'روشنی'},
-  {'arabic': 'الْهَادِي', 'english': 'The Guide', 'urdu': 'ہدایت دینے والا'},
-  {'arabic': 'الْبَدِيعُ', 'english': 'The Incomparable', 'urdu': 'بے مثال'},
-  {'arabic': 'الْبَاقِي', 'english': 'The Everlasting', 'urdu': 'ہمیشہ رہنے والا'},
-  {'arabic': 'الْوَارِثُ', 'english': 'The Inheritor', 'urdu': 'وارث'},
-  {'arabic': 'الرَّشِيدُ', 'english': 'The Guide to Right Path', 'urdu': 'سیدھی راہ دکھانے والا'},
-  {'arabic': 'الصَّبُورُ', 'english': 'The Patient', 'urdu': 'صبر کرنے والا'},
-];
 
 class HomeScreen extends StatefulWidget {
   @override
@@ -132,10 +28,6 @@ class _HomeScreenState extends State<HomeScreen> {
   String errorMsg = '';
   String nextPrayer = '';
   HadithModel? _todaysHadith;
-
-  // 99 Names search
-  String _namesSearch = '';
-  final TextEditingController _searchController = TextEditingController();
 
   @override
   void initState() {
@@ -150,7 +42,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
-    _searchController.dispose();
     super.dispose();
   }
 
@@ -361,8 +252,7 @@ class _HomeScreenState extends State<HomeScreen> {
               Expanded(
                 child: prayerTimes == null
                     ? const Center(child: CircularProgressIndicator())
-                    : _buildScrollBody(isUrdu, primaryColor, cardColor,
-                        textPrimary, textSecondary, isDark),
+                    : _buildPrayerTimesView(isUrdu, primaryColor, cardColor, textPrimary, isDark),
               ),
             ],
           ),
@@ -371,186 +261,16 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // ── Scrollable body: prayer list + 99 Names ────────────────────────────
-  Widget _buildScrollBody(bool isUrdu, Color primaryColor, Color cardColor,
-      Color textPrimary, Color textSecondary, bool isDark) {
-    final filtered = _namesSearch.isEmpty
-        ? _allahNames
-        : _allahNames
-            .where((n) =>
-                n['arabic']!.contains(_namesSearch) ||
-                n['english']!
-                    .toLowerCase()
-                    .contains(_namesSearch.toLowerCase()) ||
-                n['urdu']!.contains(_namesSearch))
-            .toList();
-
+  Widget _buildPrayerTimesView(bool isUrdu, Color primaryColor, Color cardColor, Color textPrimary, bool isDark) {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        // Prayer time cards
-        _prayerCard('Fajr', _formatTo12Hour(prayerTimes!.fajr),
-            Icons.wb_twilight, isUrdu, nextPrayer == 'Fajr',
-            primaryColor, cardColor, textPrimary, isDark),
-        _prayerCard('Dhuhr', _formatTo12Hour(prayerTimes!.dhuhr),
-            Icons.wb_sunny, isUrdu, nextPrayer == 'Dhuhr',
-            primaryColor, cardColor, textPrimary, isDark),
-        _prayerCard('Asr', _formatTo12Hour(prayerTimes!.asr),
-            Icons.brightness_5, isUrdu, nextPrayer == 'Asr',
-            primaryColor, cardColor, textPrimary, isDark),
-        _prayerCard('Maghrib', _formatTo12Hour(prayerTimes!.maghrib),
-            Icons.nights_stay, isUrdu, nextPrayer == 'Maghrib',
-            primaryColor, cardColor, textPrimary, isDark),
-        _prayerCard('Isha', _formatTo12Hour(prayerTimes!.isha),
-            Icons.nightlight_round, isUrdu, nextPrayer == 'Isha',
-            primaryColor, cardColor, textPrimary, isDark),
-
-        const SizedBox(height: 24),
-
-        // ── 99 Names section header ────────────────────────────────
-        Row(
-          children: [
-            Icon(Icons.auto_awesome, color: primaryColor, size: 22),
-            const SizedBox(width: 8),
-            Text(
-              isUrdu ? 'اللہ کے ۹۹ نام' : '99 Names of Allah',
-              style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                  color: textPrimary),
-            ),
-          ],
-        ),
-        const SizedBox(height: 12),
-
-        // Search bar
-        TextField(
-          controller: _searchController,
-          onChanged: (v) => setState(() => _namesSearch = v),
-          decoration: InputDecoration(
-            hintText: isUrdu ? 'نام تلاش کریں...' : 'Search names...',
-            prefixIcon: Icon(Icons.search, color: primaryColor),
-            suffixIcon: _namesSearch.isNotEmpty
-                ? IconButton(
-                    icon: const Icon(Icons.clear),
-                    onPressed: () {
-                      _searchController.clear();
-                      setState(() => _namesSearch = '');
-                    },
-                  )
-                : null,
-            filled: true,
-            fillColor: primaryColor.withOpacity(0.06),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(16),
-              borderSide: BorderSide.none,
-            ),
-            contentPadding:
-                const EdgeInsets.symmetric(vertical: 0, horizontal: 16),
-          ),
-        ),
-        const SizedBox(height: 12),
-
-        // Names grid
-        GridView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          itemCount: filtered.length,
-          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 2,
-            mainAxisSpacing: 10,
-            crossAxisSpacing: 10,
-            childAspectRatio: 1.55,
-          ),
-          itemBuilder: (context, index) {
-            final name = filtered[index];
-            // Number in original list
-            final number = _allahNames.indexOf(name) + 1;
-            return _nameCard(
-              number: number,
-              arabic: name['arabic']!,
-              translation:
-                  isUrdu ? name['urdu']! : name['english']!,
-              primaryColor: primaryColor,
-              cardColor: cardColor,
-              textPrimary: textPrimary,
-              textSecondary: textSecondary,
-              isDark: isDark,
-            );
-          },
-        ),
-        const SizedBox(height: 16),
+        _prayerCard('Fajr', _formatTo12Hour(prayerTimes!.fajr), Icons.wb_twilight, isUrdu, nextPrayer == 'Fajr', primaryColor, cardColor, textPrimary, isDark),
+        _prayerCard('Dhuhr', _formatTo12Hour(prayerTimes!.dhuhr), Icons.wb_sunny, isUrdu, nextPrayer == 'Dhuhr', primaryColor, cardColor, textPrimary, isDark),
+        _prayerCard('Asr', _formatTo12Hour(prayerTimes!.asr), Icons.brightness_5, isUrdu, nextPrayer == 'Asr', primaryColor, cardColor, textPrimary, isDark),
+        _prayerCard('Maghrib', _formatTo12Hour(prayerTimes!.maghrib), Icons.nights_stay, isUrdu, nextPrayer == 'Maghrib', primaryColor, cardColor, textPrimary, isDark),
+        _prayerCard('Isha', _formatTo12Hour(prayerTimes!.isha), Icons.nightlight_round, isUrdu, nextPrayer == 'Isha', primaryColor, cardColor, textPrimary, isDark),
       ],
-    );
-  }
-
-  Widget _nameCard({
-    required int number,
-    required String arabic,
-    required String translation,
-    required Color primaryColor,
-    required Color cardColor,
-    required Color textPrimary,
-    required Color textSecondary,
-    required bool isDark,
-  }) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: cardColor,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: primaryColor.withOpacity(0.15),
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Number badge
-          Container(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-            decoration: BoxDecoration(
-              color: primaryColor.withOpacity(0.12),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Text(
-              '$number',
-              style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.bold,
-                  color: primaryColor),
-            ),
-          ),
-          const SizedBox(height: 6),
-          // Arabic name
-          Expanded(
-            child: Align(
-              alignment: Alignment.centerRight,
-              child: Text(
-                arabic,
-                textAlign: TextAlign.right,
-                style: TextStyle(
-                  fontSize: 17,
-                  fontWeight: FontWeight.bold,
-                  color: primaryColor,
-                  height: 1.3,
-                ),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-          ),
-          const SizedBox(height: 4),
-          // Translation
-          Text(
-            translation,
-            style: TextStyle(fontSize: 11, color: textSecondary),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-        ],
-      ),
     );
   }
 
