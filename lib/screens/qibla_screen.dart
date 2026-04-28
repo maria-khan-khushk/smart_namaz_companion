@@ -208,9 +208,16 @@ class _QiblaScreenState extends State<QiblaScreen>
   // Mosque finder — Overpass API (OpenStreetMap, no key needed)
   // ─────────────────────────────────────────────────────────────────────────
 
+  // Multiple Overpass mirrors — tried in order until one succeeds
+  static const List<String> _overpassMirrors = [
+    'https://overpass-api.de/api/interpreter',
+    'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
+    'https://overpass.kumi.systems/api/interpreter',
+  ];
+
   Future<void> _findNearbyMosques() async {
     if (_currentPosition == null) {
-      setState(() => _mosqueError = 'Location not available. Please retry.');
+      setState(() => _mosqueError = 'Location not available. Please retry Qibla detection first.');
       return;
     }
 
@@ -222,72 +229,104 @@ class _QiblaScreenState extends State<QiblaScreen>
 
     final lat = _currentPosition!.latitude;
     final lon = _currentPosition!.longitude;
-    const radiusMeters = 5000; // 5 km
+    const radiusMeters = 5000;
 
-    // Overpass QL query — finds all nodes/ways tagged amenity=place_of_worship + religion=muslim
-    final query = '''
-[out:json][timeout:20];
-(
-  node["amenity"="place_of_worship"]["religion"="muslim"](around:$radiusMeters,$lat,$lon);
-  way["amenity"="place_of_worship"]["religion"="muslim"](around:$radiusMeters,$lat,$lon);
-);
-out center 30;
-''';
+    // Broadened query: catches mosque tag variants used across different regions
+    final query =
+        '[out:json][timeout:25];'
+        '('
+        'node["amenity"="place_of_worship"]["religion"="muslim"](around:$radiusMeters,$lat,$lon);'
+        'way["amenity"="place_of_worship"]["religion"="muslim"](around:$radiusMeters,$lat,$lon);'
+        'node["amenity"="mosque"](around:$radiusMeters,$lat,$lon);'
+        'way["amenity"="mosque"](around:$radiusMeters,$lat,$lon);'
+        ');'
+        'out center 40;';
 
-    try {
-      final response = await http
-          .post(
-            Uri.parse('https://overpass-api.de/api/interpreter'),
-            body: {'data': query},
-          )
-          .timeout(const Duration(seconds: 20));
+    String? lastError;
 
-      if (response.statusCode != 200) {
-        throw Exception('Server error ${response.statusCode}');
-      }
+    for (final mirror in _overpassMirrors) {
+      try {
+        print("[MosqueFinder] Trying mirror: $mirror");
 
-      final json = jsonDecode(response.body) as Map<String, dynamic>;
-      final elements = json['elements'] as List<dynamic>;
+        final response = await http.post(
+          Uri.parse(mirror),
+          headers: {"Content-Type": "application/x-www-form-urlencoded"},
+          body: "data=${Uri.encodeComponent(query)}",
+        ).timeout(const Duration(seconds: 25));
 
-      List<_Mosque> results = [];
+        print("[MosqueFinder] Status: ${response.statusCode}");
 
-      for (final el in elements) {
-        // Ways return a 'center' node; nodes have direct lat/lon
-        double? mLat, mLon;
-        if (el['type'] == 'node') {
-          mLat = (el['lat'] as num).toDouble();
-          mLon = (el['lon'] as num).toDouble();
-        } else if (el['type'] == 'way' && el['center'] != null) {
-          mLat = (el['center']['lat'] as num).toDouble();
-          mLon = (el['center']['lon'] as num).toDouble();
+        if (response.statusCode != 200) {
+          lastError = "Server returned ${response.statusCode}";
+          continue;
         }
-        if (mLat == null || mLon == null) continue;
 
-        final tags = el['tags'] as Map<String, dynamic>? ?? {};
-        final name = (tags['name'] as String?)?.trim() ??
-            (tags['name:en'] as String?)?.trim() ??
-            (tags['name:ur'] as String?)?.trim() ??
-            'Mosque';
+        final decoded = jsonDecode(response.body);
+        if (decoded is! Map<String, dynamic>) {
+          lastError = "Unexpected response format";
+          continue;
+        }
 
-        final dist = _haversineKm(lat, lon, mLat, mLon);
-        results.add(_Mosque(name: name, lat: mLat, lon: mLon, distanceKm: dist));
+        final elements = decoded["elements"];
+        if (elements is! List) {
+          lastError = "No elements in response";
+          continue;
+        }
+
+        final List<_Mosque> results = [];
+
+        for (final el in elements) {
+          double? mLat, mLon;
+          if (el["type"] == "node") {
+            mLat = (el["lat"] as num?)?.toDouble();
+            mLon = (el["lon"] as num?)?.toDouble();
+          } else if (el["type"] == "way" && el["center"] != null) {
+            mLat = (el["center"]["lat"] as num?)?.toDouble();
+            mLon = (el["center"]["lon"] as num?)?.toDouble();
+          }
+          if (mLat == null || mLon == null) continue;
+
+          final tags = el["tags"] as Map<String, dynamic>? ?? {};
+          final name = (tags["name:ur"] as String?)?.trim().isNotEmpty == true
+              ? tags["name:ur"] as String
+              : (tags["name"] as String?)?.trim().isNotEmpty == true
+                  ? tags["name"] as String
+                  : (tags["name:en"] as String?)?.trim().isNotEmpty == true
+                      ? tags["name:en"] as String
+                      : "Mosque";
+
+          final dist = _haversineKm(lat, lon, mLat, mLon);
+          results.add(_Mosque(name: name, lat: mLat, lon: mLon, distanceKm: dist));
+        }
+
+        // Deduplicate by name + approximate location
+        final seen = <String>{};
+        final unique = results.where((m) {
+          final key = "${m.name}_${m.lat.toStringAsFixed(3)}_${m.lon.toStringAsFixed(3)}";
+          return seen.add(key);
+        }).toList();
+
+        unique.sort((a, b) => a.distanceKm.compareTo(b.distanceKm));
+
+        setState(() {
+          _mosques = unique;
+          _mosquesLoaded = true;
+          _isFindingMosques = false;
+          _mosqueError = unique.isEmpty ? "No mosques found within 5 km." : "";
+        });
+        return; // success
+
+      } catch (e) {
+        lastError = e.toString();
+        print("[MosqueFinder] Mirror failed ($mirror): $e");
       }
-
-      // Sort closest first
-      results.sort((a, b) => a.distanceKm.compareTo(b.distanceKm));
-
-      setState(() {
-        _mosques = results;
-        _mosquesLoaded = true;
-        _isFindingMosques = false;
-        if (results.isEmpty) _mosqueError = 'No mosques found within 5 km.';
-      });
-    } catch (e) {
-      setState(() {
-        _isFindingMosques = false;
-        _mosqueError = 'Could not fetch mosques. Check your internet connection.';
-      });
     }
+
+    // All mirrors failed
+    setState(() {
+      _isFindingMosques = false;
+      _mosqueError = "Could not reach mosque data. Please try again.\n(${lastError ?? 'Unknown error'})";
+    });
   }
 
   /// Haversine formula — returns distance in km

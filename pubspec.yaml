@@ -23,8 +23,6 @@ dependencies:
   sensors_plus: ^6.0.1 
   geolocator: ^13.0.2              # Get user's current GPS location (latitude/longitude)
   permission_handler: ^11.3.1      # Request location permission (Android/iOS)
-  # flutter_compass: ^0.8.1       # Get device's compass heading (phone orientation)
-  # flutter_qiblah: ^3.1.0           # Calculate Qibla direction based on location
 
   # ========== Networking & API ==========
   http: ^1.1.0                     # Fetch prayer times from Aladhan API
@@ -48,11 +46,36 @@ dependencies:
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  flutter_lints: ^6.0.0            # Code style and linting rules
+  flutter_launcher_icons: ^0.14.3
+  flutter_native_splash: ^2.4.0    # For splash screen (uses same logo)
+  flutter_lints: ^6.0.0
 
 flutter:
   uses-material-design: true
 
   assets:
-    - assets/sounds/azan.mp3       # Azan sound file (for manual playback)
-    - assets/hadiths.json          # Daily hadith data
+    - assets/sounds/azan.mp3
+    - assets/hadiths.json
+    - assets/logo.png              # Your logo image (used for both icon and splash)
+
+# ========== Launcher Icon Configuration ==========
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: true
+  image_path: "assets/logo.png"
+  remove_alpha_ios: true
+  web:
+    generate: true
+    image_path: "assets/logo.png"
+    background_color: "#FFFFFF"
+    theme_color: "#FFFFFF"
+
+# ========== Native Splash Screen Configuration ==========
+flutter_native_splash:
+  color: "#FFFFFF"                 # Background color (white)
+  image: "assets/logo.png"         # Same logo used for splash
+  android: true
+  ios: true
+  android_12:
+    image: "assets/logo.png"       # For Android 12+ adaptive splash
+    color: "#FFFFFF"

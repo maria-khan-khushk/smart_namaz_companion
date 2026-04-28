@@ -25,7 +25,7 @@
     <application
         android:label="smart_namaz_companion"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher"
+        android:icon="@mipmap/launcher_icon"
         android:usesCleartextTraffic="true">
         <service
     android:name="dev.fluttercommunity.plus.androidalarmmanager.AlarmService"
