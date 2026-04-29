@@ -88,6 +88,9 @@ class _QiblaScreenState extends State<QiblaScreen>
   // Sensors
   // ─────────────────────────────────────────────────────────────────────────
 
+  // Throttle: only update UI at most every 100ms (10 fps) to avoid freeze
+  DateTime _lastSensorUpdate = DateTime.fromMillisecondsSinceEpoch(0);
+
   void _startSensors() {
     _streamSubscriptions.add(
       accelerometerEventStream().listen((e) {
@@ -104,6 +107,10 @@ class _QiblaScreenState extends State<QiblaScreen>
   }
 
   void _updateHeading() {
+    // Throttle setState to max 10x per second
+    final now = DateTime.now();
+    final shouldUpdate = now.difference(_lastSensorUpdate).inMilliseconds >= 100;
+
     double norm = sqrt(_ax * _ax + _ay * _ay + _az * _az);
     if (norm == 0) return;
     double ax = _ax / norm, ay = _ay / norm, az = _az / norm;
@@ -117,7 +124,9 @@ class _QiblaScreenState extends State<QiblaScreen>
     heading = (heading + 360) % 360;
     _headingBuffer.add(heading);
     if (_headingBuffer.length > _bufferSize) _headingBuffer.removeAt(0);
-    if (mounted) {
+
+    if (shouldUpdate && mounted) {
+      _lastSensorUpdate = now;
       setState(() => _deviceHeading = _circularMean(_headingBuffer));
       _animateArrow();
     }
@@ -205,128 +214,139 @@ class _QiblaScreenState extends State<QiblaScreen>
   }
 
   // ─────────────────────────────────────────────────────────────────────────
-  // Mosque finder — Overpass API (OpenStreetMap, no key needed)
   // ─────────────────────────────────────────────────────────────────────────
-
-  // Multiple Overpass mirrors — tried in order until one succeeds
-  static const List<String> _overpassMirrors = [
-    'https://overpass-api.de/api/interpreter',
-    'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
-    'https://overpass.kumi.systems/api/interpreter',
-  ];
+  // Mosque finder — multi-API waterfall (Nominatim → Overpass mirrors)
+  // ─────────────────────────────────────────────────────────────────────────
 
   Future<void> _findNearbyMosques() async {
     if (_currentPosition == null) {
       setState(() => _mosqueError = 'Location not available. Please retry Qibla detection first.');
       return;
     }
-
-    setState(() {
-      _isFindingMosques = true;
-      _mosqueError = '';
-      _mosques = [];
-    });
+    setState(() { _isFindingMosques = true; _mosqueError = ''; _mosques = []; });
 
     final lat = _currentPosition!.latitude;
     final lon = _currentPosition!.longitude;
-    const radiusMeters = 5000;
 
-    // Broadened query: catches mosque tag variants used across different regions
-    final query =
-        '[out:json][timeout:25];'
-        '('
-        'node["amenity"="place_of_worship"]["religion"="muslim"](around:$radiusMeters,$lat,$lon);'
-        'way["amenity"="place_of_worship"]["religion"="muslim"](around:$radiusMeters,$lat,$lon);'
-        'node["amenity"="mosque"](around:$radiusMeters,$lat,$lon);'
-        'way["amenity"="mosque"](around:$radiusMeters,$lat,$lon);'
-        ');'
-        'out center 40;';
+    // Try each source in order — first success wins
+    List<_Mosque>? result;
 
-    String? lastError;
+    result ??= await _fetchViaNominatim(lat, lon);
+    result ??= await _fetchViaOverpass(lat, lon, 'https://overpass-api.de/api/interpreter');
+    result ??= await _fetchViaOverpass(lat, lon, 'https://overpass.kumi.systems/api/interpreter');
+    result ??= await _fetchViaOverpass(lat, lon, 'https://maps.mail.ru/osm/tools/overpass/api/interpreter');
 
-    for (final mirror in _overpassMirrors) {
-      try {
-        print("[MosqueFinder] Trying mirror: $mirror");
-
-        final response = await http.post(
-          Uri.parse(mirror),
-          headers: {"Content-Type": "application/x-www-form-urlencoded"},
-          body: "data=${Uri.encodeComponent(query)}",
-        ).timeout(const Duration(seconds: 25));
-
-        print("[MosqueFinder] Status: ${response.statusCode}");
-
-        if (response.statusCode != 200) {
-          lastError = "Server returned ${response.statusCode}";
-          continue;
-        }
-
-        final decoded = jsonDecode(response.body);
-        if (decoded is! Map<String, dynamic>) {
-          lastError = "Unexpected response format";
-          continue;
-        }
-
-        final elements = decoded["elements"];
-        if (elements is! List) {
-          lastError = "No elements in response";
-          continue;
-        }
-
-        final List<_Mosque> results = [];
-
-        for (final el in elements) {
-          double? mLat, mLon;
-          if (el["type"] == "node") {
-            mLat = (el["lat"] as num?)?.toDouble();
-            mLon = (el["lon"] as num?)?.toDouble();
-          } else if (el["type"] == "way" && el["center"] != null) {
-            mLat = (el["center"]["lat"] as num?)?.toDouble();
-            mLon = (el["center"]["lon"] as num?)?.toDouble();
-          }
-          if (mLat == null || mLon == null) continue;
-
-          final tags = el["tags"] as Map<String, dynamic>? ?? {};
-          final name = (tags["name:ur"] as String?)?.trim().isNotEmpty == true
-              ? tags["name:ur"] as String
-              : (tags["name"] as String?)?.trim().isNotEmpty == true
-                  ? tags["name"] as String
-                  : (tags["name:en"] as String?)?.trim().isNotEmpty == true
-                      ? tags["name:en"] as String
-                      : "Mosque";
-
-          final dist = _haversineKm(lat, lon, mLat, mLon);
-          results.add(_Mosque(name: name, lat: mLat, lon: mLon, distanceKm: dist));
-        }
-
-        // Deduplicate by name + approximate location
-        final seen = <String>{};
-        final unique = results.where((m) {
-          final key = "${m.name}_${m.lat.toStringAsFixed(3)}_${m.lon.toStringAsFixed(3)}";
-          return seen.add(key);
-        }).toList();
-
-        unique.sort((a, b) => a.distanceKm.compareTo(b.distanceKm));
-
-        setState(() {
-          _mosques = unique;
-          _mosquesLoaded = true;
-          _isFindingMosques = false;
-          _mosqueError = unique.isEmpty ? "No mosques found within 5 km." : "";
-        });
-        return; // success
-
-      } catch (e) {
-        lastError = e.toString();
-        print("[MosqueFinder] Mirror failed ($mirror): $e");
-      }
+    if (result != null) {
+      result.sort((a, b) => a.distanceKm.compareTo(b.distanceKm));
+      setState(() {
+        _mosques = result!;
+        _mosquesLoaded = true;
+        _isFindingMosques = false;
+        _mosqueError = result!.isEmpty ? 'No mosques found nearby.' : '';
+      });
+    } else {
+      setState(() {
+        _isFindingMosques = false;
+        _mosqueError =
+            'Could not fetch mosque data.\n\n'
+            'Possible causes:\n'
+            '• No internet connection\n'
+            '• Location services blocked\n'
+            '• OSM servers temporarily unavailable\n\n'
+            'Please try again in a few seconds.';
+      });
     }
+  }
 
-    // All mirrors failed
-    setState(() {
-      _isFindingMosques = false;
-      _mosqueError = "Could not reach mosque data. Please try again.\n(${lastError ?? 'Unknown error'})";
-    });
+  /// Source 1: Nominatim geocoding — lightweight GET, usually fastest
+  Future<List<_Mosque>?> _fetchViaNominatim(double lat, double lon) async {
+    try {
+      final double delta = 0.45; // ~50 km bounding box — find whatever is nearest
+      final uri = Uri.parse(
+        'https://nominatim.openstreetmap.org/search'
+        '?format=json&q=mosque&bounded=1'
+        '&viewbox=${lon-delta},${lat+delta},${lon+delta},${lat-delta}'
+        '&limit=40&addressdetails=0',
+      );
+      final resp = await http.get(uri, headers: {
+        'User-Agent': 'SmartNamazCompanion/1.0',
+        'Accept-Language': 'en,ur',
+      }).timeout(const Duration(seconds: 12));
+
+      if (resp.statusCode != 200) return null;
+
+      final raw = jsonDecode(resp.body) as List<dynamic>;
+      final List<_Mosque> list = [];
+      for (final item in raw) {
+        final mLat = double.tryParse(item['lat']?.toString() ?? '');
+        final mLon = double.tryParse(item['lon']?.toString() ?? '');
+        if (mLat == null || mLon == null) continue;
+        final dist = _haversineKm(lat, lon, mLat, mLon);
+        final nameParts = (item['display_name'] as String? ?? 'Mosque').split(',');
+        final name = nameParts.first.trim().isEmpty ? 'Mosque' : nameParts.first.trim();
+        list.add(_Mosque(name: name, lat: mLat, lon: mLon, distanceKm: dist));
+      }
+      // deduplicate
+      final seen = <String>{};
+      final deduped = list.where((m) => seen.add('${m.name}_${m.lat.toStringAsFixed(3)}')).toList();
+      deduped.sort((a, b) => a.distanceKm.compareTo(b.distanceKm));
+      return deduped.take(20).toList();
+    } catch (e) {
+      print('[MosqueFinder] Nominatim failed: \$e');
+      return null;
+    }
+  }
+
+  /// Source 2+: Overpass API mirrors — richer data, slower
+  Future<List<_Mosque>?> _fetchViaOverpass(double lat, double lon, String endpoint) async {
+    try {
+      const r = 50000; // 50 km — find nearest regardless of distance
+      final query =
+          '[out:json][timeout:20];'
+          '('
+          'node["amenity"="place_of_worship"]["religion"="muslim"](around:$r,$lat,$lon);'
+          'way["amenity"="place_of_worship"]["religion"="muslim"](around:$r,$lat,$lon);'
+          'node["amenity"="mosque"](around:$r,$lat,$lon);'
+          'way["amenity"="mosque"](around:$r,$lat,$lon);'
+          ');out center 40;';
+
+      final resp = await http.post(
+        Uri.parse(endpoint),
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: 'data=${Uri.encodeComponent(query)}',
+      ).timeout(const Duration(seconds: 22));
+
+      if (resp.statusCode != 200) return null;
+
+      final decoded = jsonDecode(resp.body);
+      if (decoded is! Map || decoded['elements'] is! List) return null;
+
+      final List<_Mosque> list = [];
+      for (final el in decoded['elements'] as List) {
+        double? mLat, mLon;
+        if (el['type'] == 'node') {
+          mLat = (el['lat'] as num?)?.toDouble();
+          mLon = (el['lon'] as num?)?.toDouble();
+        } else if (el['type'] == 'way' && el['center'] != null) {
+          mLat = (el['center']['lat'] as num?)?.toDouble();
+          mLon = (el['center']['lon'] as num?)?.toDouble();
+        }
+        if (mLat == null || mLon == null) continue;
+        final tags = el['tags'] as Map<String, dynamic>? ?? {};
+        final name =
+            (tags['name:ur'] as String?)?.trim().isNotEmpty == true ? tags['name:ur'] as String :
+            (tags['name'] as String?)?.trim().isNotEmpty == true ? tags['name'] as String :
+            (tags['name:en'] as String?)?.trim().isNotEmpty == true ? tags['name:en'] as String :
+            'Mosque';
+        final dist = _haversineKm(lat, lon, mLat, mLon);
+        list.add(_Mosque(name: name, lat: mLat, lon: mLon, distanceKm: dist));
+      }
+      final seen = <String>{};
+      return list.where((m) => seen.add('${m.name}_${m.lat.toStringAsFixed(3)}')).toList();
+    } catch (e) {
+      print('[MosqueFinder] Overpass ($endpoint) failed: $e');
+      return null;
+    }
   }
 
   /// Haversine formula — returns distance in km
@@ -501,7 +521,7 @@ class _QiblaScreenState extends State<QiblaScreen>
           Padding(
             padding: const EdgeInsets.only(left: 14),
             child: Text(
-              isUrdu ? '5 کلومیٹر کے اندر مساجد' : 'Mosques within 5 km of you',
+              isUrdu ? 'قریبی مساجد' : 'Nearest mosques to you',
               style: TextStyle(fontSize: 12, color: textSecondary),
             ),
           ),
@@ -543,10 +563,15 @@ class _QiblaScreenState extends State<QiblaScreen>
                 borderRadius: BorderRadius.circular(14),
                 border: Border.all(color: Colors.orange.withOpacity(0.3)),
               ),
-              child: Row(children: [
-                const Icon(Icons.info_outline_rounded, color: Colors.orange, size: 20),
-                const SizedBox(width: 10),
-                Expanded(child: Text(_mosqueError, style: const TextStyle(color: Colors.orange, fontSize: 13))),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Row(children: [
+                  const Icon(Icons.info_outline_rounded, color: Colors.orange, size: 18),
+                  const SizedBox(width: 8),
+                  Text(isUrdu ? 'خرابی' : 'Could not load mosques',
+                      style: const TextStyle(color: Colors.orange, fontSize: 13, fontWeight: FontWeight.bold)),
+                ]),
+                const SizedBox(height: 8),
+                Text(_mosqueError, style: TextStyle(color: Colors.orange.shade700, fontSize: 12, height: 1.5)),
               ]),
             ),
 
