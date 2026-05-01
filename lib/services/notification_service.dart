@@ -9,16 +9,14 @@ import 'package:provider/provider.dart';
 import 'package:flutter/material.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Top-level callback for AndroidAlarmManager (must be a top-level function)
-// This fires even when the app is in the background / closed.
+// Top-level callback — AndroidAlarmManager fires this even when app is closed.
+// Used for the 5 daily prayer azan alarms.
 // ─────────────────────────────────────────────────────────────────────────────
 @pragma('vm:entry-point')
 Future<void> azanAlarmCallback() async {
-  // Play azan sound
   final player = AudioPlayer();
   try {
     await player.play(AssetSource('sounds/azan.mp3'));
-    // Stop after 30 seconds
     await Future.delayed(const Duration(seconds: 30));
     await player.stop();
     await player.dispose();
@@ -26,10 +24,8 @@ Future<void> azanAlarmCallback() async {
     print('Error playing azan in background: $e');
   }
 
-  // Also show a heads-up notification so the user sees which prayer it is
   final FlutterLocalNotificationsPlugin notifications =
       FlutterLocalNotificationsPlugin();
-
   const AndroidInitializationSettings androidSettings =
       AndroidInitializationSettings('@mipmap/ic_launcher');
   await notifications.initialize(
@@ -38,71 +34,82 @@ Future<void> azanAlarmCallback() async {
   const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
     'azan_channel',
     'Azan Notifications',
-    channelDescription: 'Prayer time notifications with Azan sound',
+    channelDescription: 'Prayer time notifications',
     importance: Importance.max,
     priority: Priority.high,
-    playSound: false, // sound handled by AudioPlayer above
+    playSound: false, // sound already playing via AudioPlayer
     enableVibration: true,
     fullScreenIntent: true,
-    ongoing: false,
   );
 
   await notifications.show(
     DateTime.now().millisecondsSinceEpoch ~/ 1000,
     'Prayer Time 🕌',
-    'It is time for prayer. Tap to open.',
+    'It is time for prayer.',
     const NotificationDetails(android: androidDetails),
   );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Alarm IDs for each prayer (stable, won't collide with hadith id=999)
+// Stable alarm IDs for the 5 daily prayers
 // ─────────────────────────────────────────────────────────────────────────────
 class _AzanIds {
-  static const int fajr = 1001;
-  static const int dhuhr = 1002;
-  static const int asr = 1003;
+  static const int fajr    = 1001;
+  static const int dhuhr   = 1002;
+  static const int asr     = 1003;
   static const int maghrib = 1004;
-  static const int isha = 1005;
+  static const int isha    = 1005;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// NotificationService
+//
+// TWO channels:
+//   'azan_channel'          → system default sound  (prayer time banners)
+//   'reminder_azan_channel' → azan.mp3 auto-plays   (manual reminders)
+//
+// ONE-TIME SETUP required:
+//   mkdir -p android/app/src/main/res/raw
+//   cp assets/sounds/azan.mp3 android/app/src/main/res/raw/azan.mp3
+//
+// Then UNINSTALL the app from device and reinstall so Android picks up the
+// new channel sound (Android caches channel settings permanently per install).
+// ─────────────────────────────────────────────────────────────────────────────
 class NotificationService {
   static final FlutterLocalNotificationsPlugin _notifications =
       FlutterLocalNotificationsPlugin();
 
-  // ── Init ──────────────────────────────────────────────────────────────────
+  static const String _defaultChannelId  = 'azan_channel';
+  static const String _reminderChannelId = 'reminder_azan_channel';
+
+  // ── Initialize ─────────────────────────────────────────────────────────────
 
   static Future<void> initialize() async {
-    if (!tz.timeZoneDatabase.isInitialized) {
-      tz.initializeTimeZones();
-    }
+    if (!tz.timeZoneDatabase.isInitialized) tz.initializeTimeZones();
 
     const AndroidInitializationSettings androidSettings =
         AndroidInitializationSettings('@mipmap/ic_launcher');
-    const DarwinInitializationSettings iosSettings =
-        DarwinInitializationSettings(
+    const DarwinInitializationSettings iosSettings = DarwinInitializationSettings(
       requestAlertPermission: true,
       requestBadgePermission: true,
       requestSoundPermission: true,
     );
 
     await _notifications.initialize(
-      const InitializationSettings(
-          android: androidSettings, iOS: iosSettings),
+      const InitializationSettings(android: androidSettings, iOS: iosSettings),
       onDidReceiveNotificationResponse: _onNotificationTap,
     );
 
-    // Initialize alarm manager (Android background execution)
     await AndroidAlarmManager.initialize();
-
     print('NotificationService initialized');
   }
 
-  // ── Notification tap (fallback — user taps notification) ─────────────────
+  // ── Tap handler ─────────────────────────────────────────────────────────────
+  // Plays azan when user taps a notification (fallback for prayer time banners)
 
-  static Future<void> _onNotificationTap(
-      NotificationResponse response) async {
-    if (response.payload == 'azan_reminder') {
+  static Future<void> _onNotificationTap(NotificationResponse response) async {
+    if (response.payload == 'azan_reminder' ||
+        response.payload == 'manual_reminder') {
       final player = AudioPlayer();
       try {
         await player.play(AssetSource('sounds/azan.mp3'));
@@ -113,29 +120,104 @@ class NotificationService {
     }
   }
 
-  // ── Notification channel ──────────────────────────────────────────────────
+  // ── Create channels ─────────────────────────────────────────────────────────
+  //
+  // Deletes old channels first so Android is forced to re-read the sound setting.
+  // Android permanently caches channel config — deletion is the only way to reset.
 
   static Future<void> createNotificationChannel() async {
-    const AndroidNotificationChannel channel = AndroidNotificationChannel(
-      'azan_channel',
-      'Azan Notifications',
-      description: 'Prayer time notifications with Azan sound',
-      importance: Importance.high,
-      playSound: true,
-      enableVibration: true,
-      enableLights: true,
-    );
-    await _notifications
+    final plugin = _notifications
         .resolvePlatformSpecificImplementation<
-            AndroidFlutterLocalNotificationsPlugin>()
-        ?.createNotificationChannel(channel);
+            AndroidFlutterLocalNotificationsPlugin>();
+    if (plugin == null) return;
+
+    // Delete stale cached channels so sound changes take effect
+    await plugin.deleteNotificationChannel(_defaultChannelId);
+    await plugin.deleteNotificationChannel(_reminderChannelId);
+
+    // Channel 1 — system default sound (prayer time banner notifications)
+    await plugin.createNotificationChannel(
+      const AndroidNotificationChannel(
+        _defaultChannelId,
+        'Azan Notifications',
+        description: 'Prayer time notifications',
+        importance: Importance.high,
+        playSound: true,
+        enableVibration: true,
+        enableLights: true,
+      ),
+    );
+
+    // Channel 2 — azan.mp3 plays automatically when reminder fires
+    // Requires: android/app/src/main/res/raw/azan.mp3
+    await plugin.createNotificationChannel(
+      const AndroidNotificationChannel(
+        _reminderChannelId,
+        'Reminder Azan Sound',
+        description: 'Manual reminders that auto-play Azan sound',
+        importance: Importance.max,
+        playSound: true,
+        sound: RawResourceAndroidNotificationSound('azan'), // no extension
+        enableVibration: true,
+        enableLights: true,
+      ),
+    );
+
+    print('Notification channels created (azan sound channel ready)');
   }
 
-  // ── Schedule Azan for all 5 prayers ──────────────────────────────────────
+  // ── Manual reminder — azan.mp3 plays automatically when notification fires ──
   //
-  // Call this from HomeScreen after fetching fresh prayer times.
-  // prayerTimes map: { 'Fajr': '05:12', 'Dhuhr': '12:30', ... }
-  // ─────────────────────────────────────────────────────────────────────────
+  // Uses reminder_azan_channel which has azan.mp3 at channel level.
+  // No tapping needed — sound fires the moment the scheduled time arrives.
+
+  static Future<void> scheduleManualReminder({
+    required int id,
+    required String title,
+    required String body,
+    required DateTime scheduledTime,
+    String? soundPath,
+  }) async {
+    if (!tz.timeZoneDatabase.isInitialized) tz.initializeTimeZones();
+
+    final AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
+      _reminderChannelId,               // ← custom azan sound channel
+      'Reminder Azan Sound',
+      channelDescription: 'Manual reminder with auto Azan sound',
+      importance: Importance.max,
+      priority: Priority.high,
+      sound: const RawResourceAndroidNotificationSound('azan'),
+      playSound: true,
+      enableVibration: true,
+      fullScreenIntent: true,
+      styleInformation: BigTextStyleInformation(body),
+    );
+
+    const DarwinNotificationDetails iosDetails = DarwinNotificationDetails(
+      sound: 'azan.mp3', // place azan.mp3 in Runner/Resources on iOS
+      presentAlert: true,
+      presentSound: true,
+      presentBadge: true,
+    );
+
+    final tz.TZDateTime tzTime = tz.TZDateTime.from(scheduledTime, tz.local);
+
+    await _notifications.zonedSchedule(
+      id,
+      title,
+      body,
+      tzTime,
+      NotificationDetails(android: androidDetails, iOS: iosDetails),
+      androidAllowWhileIdle: true,
+      uiLocalNotificationDateInterpretation:
+          UILocalNotificationDateInterpretation.absoluteTime,
+      payload: 'manual_reminder',
+    );
+
+    print('Manual reminder scheduled: id=$id "$title" at $scheduledTime');
+  }
+
+  // ── Schedule all 5 prayer azan alarms ──────────────────────────────────────
 
   static Future<void> scheduleAzanAlarms({
     required String fajr,
@@ -145,59 +227,50 @@ class NotificationService {
     required String isha,
   }) async {
     final prayers = {
-      _AzanIds.fajr: fajr,
-      _AzanIds.dhuhr: dhuhr,
-      _AzanIds.asr: asr,
+      _AzanIds.fajr:    fajr,
+      _AzanIds.dhuhr:   dhuhr,
+      _AzanIds.asr:     asr,
       _AzanIds.maghrib: maghrib,
-      _AzanIds.isha: isha,
+      _AzanIds.isha:    isha,
     };
 
-    // Cancel previous alarms before rescheduling
     await cancelAzanAlarms();
 
     final now = DateTime.now();
-    final today = '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+    final today =
+        '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
 
     for (final entry in prayers.entries) {
-      final id = entry.key;
-      final timeStr = entry.value; // e.g. "05:12"
-
       try {
-        final prayerTime =
-            DateTime.parse('$today $timeStr:00');
-
-        // Only schedule if the prayer time is in the future
+        final prayerTime = DateTime.parse('$today ${entry.value}:00');
         if (prayerTime.isAfter(now)) {
           await AndroidAlarmManager.oneShotAt(
             prayerTime,
-            id,
+            entry.key,
             azanAlarmCallback,
             exact: true,
-            wakeup: true,         // wakes device from sleep
+            wakeup: true,
             rescheduleOnReboot: true,
           );
-          print('Azan alarm set: id=$id at $prayerTime');
+          print('Azan alarm set: id=${entry.key} at $prayerTime');
         }
       } catch (e) {
-        print('Error scheduling azan alarm id=$id: $e');
+        print('Error scheduling azan alarm id=${entry.key}: $e');
       }
     }
   }
 
   static Future<void> cancelAzanAlarms() async {
     for (final id in [
-      _AzanIds.fajr,
-      _AzanIds.dhuhr,
-      _AzanIds.asr,
-      _AzanIds.maghrib,
-      _AzanIds.isha,
+      _AzanIds.fajr, _AzanIds.dhuhr, _AzanIds.asr,
+      _AzanIds.maghrib, _AzanIds.isha,
     ]) {
       await AndroidAlarmManager.cancel(id);
     }
     print('All azan alarms cancelled');
   }
 
-  // ── Generic one-off notification (used by manual reminders) ──────────────
+  // ── Generic notification (hadith, test) ─────────────────────────────────────
 
   static Future<void> scheduleNotification({
     required int id,
@@ -208,9 +281,8 @@ class NotificationService {
   }) async {
     if (!tz.timeZoneDatabase.isInitialized) tz.initializeTimeZones();
 
-    final AndroidNotificationDetails androidDetails =
-        AndroidNotificationDetails(
-      'azan_channel',
+    final AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
+      _defaultChannelId,
       'Azan Notifications',
       channelDescription: 'Prayer time notifications',
       importance: Importance.max,
@@ -222,8 +294,6 @@ class NotificationService {
     );
 
     const DarwinNotificationDetails iosDetails = DarwinNotificationDetails(
-      // iOS: put azan.mp3 (≤30s) in Runner/Resources and reference it here
-      // sound: 'azan.mp3',
       presentAlert: true,
       presentSound: true,
       presentBadge: true,
@@ -244,21 +314,6 @@ class NotificationService {
     );
   }
 
-  static Future<void> scheduleManualReminder({
-    required int id,
-    required String title,
-    required String body,
-    required DateTime scheduledTime,
-    String? soundPath,
-  }) async {
-    await scheduleNotification(
-        id: id,
-        title: title,
-        body: body,
-        scheduledTime: scheduledTime,
-        soundPath: soundPath);
-  }
-
   static Future<void> testNotification() async {
     await scheduleNotification(
       id: 99999,
@@ -269,7 +324,7 @@ class NotificationService {
     );
   }
 
-  // ── Hadith daily notification ─────────────────────────────────────────────
+  // ── Hadith daily notification ───────────────────────────────────────────────
 
   static Future<void> scheduleDailyHadithNotification({
     required BuildContext context,
@@ -279,25 +334,16 @@ class NotificationService {
   }) async {
     try {
       final hadith = await HadithService.getTodaysHadith();
-      final isUrdu =
-          Provider.of<LanguageProvider>(context, listen: false).isUrdu;
-      final String title = isUrdu ? 'آج کی حدیث' : "Today's Hadith";
-      final String body =
-          isUrdu ? hadith.urduText : hadith.englishText;
-
+      final isUrdu = Provider.of<LanguageProvider>(context, listen: false).isUrdu;
       final now = DateTime.now();
-      DateTime scheduledDateTime =
-          DateTime(now.year, now.month, now.day, hour, minute);
-      if (scheduledDateTime.isBefore(now)) {
-        scheduledDateTime =
-            scheduledDateTime.add(const Duration(days: 1));
-      }
+      DateTime scheduled = DateTime(now.year, now.month, now.day, hour, minute);
+      if (scheduled.isBefore(now)) scheduled = scheduled.add(const Duration(days: 1));
 
       await scheduleNotification(
         id: notificationId,
-        title: title,
-        body: body,
-        scheduledTime: scheduledDateTime,
+        title: isUrdu ? 'آج کی حدیث' : "Today's Hadith",
+        body: isUrdu ? hadith.urduText : hadith.englishText,
+        scheduledTime: scheduled,
         soundPath: null,
       );
     } catch (e) {
@@ -305,18 +351,16 @@ class NotificationService {
     }
   }
 
-  static Future<void> cancelNotification(int id) async {
-    await _notifications.cancel(id);
-  }
+  // ── Cancel helpers ──────────────────────────────────────────────────────────
 
-  static Future<void> cancelAllNotifications() async {
-    await _notifications.cancelAll();
-  }
+  static Future<void> cancelNotification(int id) async =>
+      _notifications.cancel(id);
 
-  static Future<void> cancelHadithNotification(
-      {int notificationId = 999}) async {
-    await cancelNotification(notificationId);
-  }
+  static Future<void> cancelAllNotifications() async =>
+      _notifications.cancelAll();
+
+  static Future<void> cancelHadithNotification({int notificationId = 999}) async =>
+      cancelNotification(notificationId);
 
   static Future<void> rescheduleHadithNotification({
     required BuildContext context,
