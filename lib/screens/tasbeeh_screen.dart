@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../providers/language_provider.dart';
 import 'guidance_screen.dart';
 
+// ── 99 Names data ────────────────────────────────────────────────────────────
 const List<Map<String, String>> _allahNames = [
   {'arabic': 'الرَّحْمَنُ', 'english': 'The Most Gracious', 'urdu': 'بہت مہربان'},
   {'arabic': 'الرَّحِيمُ', 'english': 'The Most Merciful', 'urdu': 'نہایت رحم کرنے والا'},
@@ -107,6 +108,15 @@ const List<Map<String, String>> _allahNames = [
   {'arabic': 'الصَّبُورُ', 'english': 'The Patient', 'urdu': 'صبر کرنے والا'},
 ];
 
+// ── Dhikr presets (no chips — selected via bottom sheet) ─────────────────────
+const List<Map<String, dynamic>> _dhikrPresets = [
+  {'arabic': 'سُبْحَانَ اللّٰہ',  'label': 'SubhanAllah',    'urdu': 'سبحان اللہ',    'count': 33},
+  {'arabic': 'اَلْحَمْدُ لِلّٰہ', 'label': 'Alhamdulillah',  'urdu': 'الحمد للہ',     'count': 33},
+  {'arabic': 'اَللّٰہُ اَکْبَر',  'label': 'AllahuAkbar',    'urdu': 'اللہ اکبر',     'count': 34},
+  {'arabic': 'اَسْتَغْفِرُاللّٰہ','label': 'Astaghfirullah', 'urdu': 'استغفر اللہ',   'count': 100},
+  {'arabic': 'لَا إِلٰهَ إِلَّا اللّٰہ', 'label': 'La ilaha illallah', 'urdu': 'لا الہ الا اللہ', 'count': 100},
+];
+
 class TasbeehScreen extends StatefulWidget {
   @override
   _TasbeehScreenState createState() => _TasbeehScreenState();
@@ -116,24 +126,20 @@ class _TasbeehScreenState extends State<TasbeehScreen>
     with TickerProviderStateMixin {
   late TabController _tabController;
 
-  int _counter = 0;
-  int _target = 33;
+  // Counter state
+  int _counter   = 0;
+  int _target    = 33;
+  int _selectedPreset = 0;
   bool _targetReachedShown = false;
 
+  // Animations
   late AnimationController _pulseController;
   late AnimationController _progressController;
-  late Animation<double> _pulseAnim;
-  late Animation<double> _progressAnim;
+  late Animation<double>   _pulseAnim;
+  late Animation<double>   _progressAnim;
   double _animatedProgress = 0;
 
-  final List<Map<String, dynamic>> _presets = [
-    {'label': 'SubhanAllah', 'urdu': 'سبحان اللہ', 'count': 33},
-    {'label': 'Alhamdulillah', 'urdu': 'الحمد للہ', 'count': 33},
-    {'label': 'AllahuAkbar', 'urdu': 'اللہ اکبر', 'count': 34},
-    {'label': 'Astaghfirullah', 'urdu': 'استغفر اللہ', 'count': 100},
-  ];
-  int _selectedPreset = 0;
-
+  // 99 Names search
   String _namesSearch = '';
   final TextEditingController _searchController = TextEditingController();
 
@@ -141,22 +147,17 @@ class _TasbeehScreenState extends State<TasbeehScreen>
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
+
     _pulseController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 150),
-    );
-    _pulseAnim = Tween<double>(begin: 1.0, end: 0.94).animate(
-      CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
-    );
+        vsync: this, duration: const Duration(milliseconds: 120));
+    _pulseAnim = Tween<double>(begin: 1.0, end: 0.93).animate(
+        CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut));
+
     _progressController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 400),
-    );
+        vsync: this, duration: const Duration(milliseconds: 400));
     _progressAnim = Tween<double>(begin: 0, end: 0).animate(
-      CurvedAnimation(parent: _progressController, curve: Curves.easeOut),
-    )..addListener(() {
-        setState(() => _animatedProgress = _progressAnim.value);
-      });
+        CurvedAnimation(parent: _progressController, curve: Curves.easeOut))
+      ..addListener(() => setState(() => _animatedProgress = _progressAnim.value));
   }
 
   @override
@@ -168,52 +169,72 @@ class _TasbeehScreenState extends State<TasbeehScreen>
     super.dispose();
   }
 
+  // ── Counter actions ────────────────────────────────────────────────────────
+
   void _increment() {
     if (_counter >= _target) return;
     HapticFeedback.lightImpact();
     _pulseController.forward().then((_) => _pulseController.reverse());
     setState(() => _counter++);
-    final newProgress = _counter / _target;
-    _progressAnim = Tween<double>(begin: _animatedProgress, end: newProgress)
-        .animate(CurvedAnimation(parent: _progressController, curve: Curves.easeOut));
-    _progressController.forward(from: 0);
+    _animateProgress(_counter / _target);
     if (_counter == _target && !_targetReachedShown) {
       _targetReachedShown = true;
       HapticFeedback.mediumImpact();
-      _showTargetCompletion();
+      _showCompletion();
     }
   }
 
   void _reset() {
     HapticFeedback.selectionClick();
     setState(() { _counter = 0; _targetReachedShown = false; });
-    _progressAnim = Tween<double>(begin: _animatedProgress, end: 0)
+    _animateProgress(0);
+  }
+
+  void _animateProgress(double to) {
+    _progressAnim = Tween<double>(begin: _animatedProgress, end: to)
         .animate(CurvedAnimation(parent: _progressController, curve: Curves.easeOut));
     _progressController.forward(from: 0);
   }
 
-  void _selectPreset(int index) {
+  void _applyPreset(int index) {
     setState(() {
       _selectedPreset = index;
-      _target = _presets[index]['count'] as int;
+      _target  = _dhikrPresets[index]['count'] as int;
       _counter = 0;
       _targetReachedShown = false;
     });
-    _progressAnim = Tween<double>(begin: _animatedProgress, end: 0)
-        .animate(CurvedAnimation(parent: _progressController, curve: Curves.easeOut));
-    _progressController.forward(from: 0);
+    _animateProgress(0);
   }
 
-  void _setCustomTarget() async {
-    final isUrdu = Provider.of<LanguageProvider>(context, listen: false).isUrdu;
-    final controller = TextEditingController(text: _target.toString());
+  // ── Dhikr picker — bottom sheet ────────────────────────────────────────────
+
+  Future<void> _openDhikrPicker(bool isUrdu, Color primary) async {
+    final result = await showModalBottomSheet<int>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (ctx) => _DhikrPickerSheet(
+        isUrdu: isUrdu,
+        primary: primary,
+        cardColor: Theme.of(context).cardColor,
+        selected: _selectedPreset,
+        presets: _dhikrPresets,
+      ),
+    );
+    if (result != null) _applyPreset(result);
+  }
+
+  // ── Custom target ──────────────────────────────────────────────────────────
+
+  Future<void> _setCustomTarget(bool isUrdu) async {
+    final ctrl = TextEditingController(text: _target.toString());
     await showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Text(isUrdu ? 'حد مقرر کریں' : 'Set Custom Target'),
+        title: Text(isUrdu ? 'حد مقرر کریں' : 'Set Target'),
         content: TextField(
-          controller: controller,
+          controller: ctrl,
           keyboardType: TextInputType.number,
           autofocus: true,
           decoration: InputDecoration(
@@ -222,23 +243,24 @@ class _TasbeehScreenState extends State<TasbeehScreen>
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: Text(isUrdu ? 'منسوخ' : 'Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(isUrdu ? 'منسوخ' : 'Cancel',
+                style: TextStyle(color: Theme.of(ctx).textTheme.bodyMedium?.color)),
+          ),
           ElevatedButton(
             onPressed: () {
-              final newTarget = int.tryParse(controller.text);
-              if (newTarget != null && newTarget > 0) {
+              final v = int.tryParse(ctrl.text);
+              if (v != null && v > 0) {
                 setState(() {
-                  _target = newTarget;
+                  _target = v;
                   if (_counter > _target) _counter = _target;
-                  _targetReachedShown = (_counter == _target);
+                  _targetReachedShown = _counter == _target;
                   _selectedPreset = -1;
                 });
-                final newProgress = _counter / _target;
-                _progressAnim = Tween<double>(begin: _animatedProgress, end: newProgress)
-                    .animate(CurvedAnimation(parent: _progressController, curve: Curves.easeOut));
-                _progressController.forward(from: 0);
+                _animateProgress(_counter / _target);
               }
-              Navigator.pop(context);
+              Navigator.pop(ctx);
             },
             child: Text(isUrdu ? 'محفوظ' : 'Save'),
           ),
@@ -247,40 +269,43 @@ class _TasbeehScreenState extends State<TasbeehScreen>
     );
   }
 
-  void _showTargetCompletion() {
+  void _showCompletion() {
     final isUrdu = Provider.of<LanguageProvider>(context, listen: false).isUrdu;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Row(children: [
-        const Icon(Icons.check_circle, color: Colors.white),
-        const SizedBox(width: 8),
-        Text(isUrdu ? 'مبارک ہو! آپ نے حد مکمل کر لی!' : 'Mashallah! Target complete!'),
+        const Icon(Icons.check_circle_outline_rounded, color: Colors.white, size: 20),
+        const SizedBox(width: 10),
+        Text(isUrdu ? 'ماشاءاللہ! تسبیح مکمل ہوگئی' : 'Mashallah! Tasbeeh complete',
+            style: const TextStyle(fontWeight: FontWeight.w500)),
       ]),
-      duration: const Duration(seconds: 3),
       backgroundColor: Colors.green.shade600,
       behavior: SnackBarBehavior.floating,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      margin: const EdgeInsets.all(16),
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+      duration: const Duration(seconds: 3),
     ));
   }
 
+  // ── Build ──────────────────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
-    final isUrdu = Provider.of<LanguageProvider>(context).isUrdu;
-    final primaryColor = Theme.of(context).primaryColor;
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final isUrdu   = Provider.of<LanguageProvider>(context).isUrdu;
+    final primary  = Theme.of(context).primaryColor;
+    final isDark   = Theme.of(context).brightness == Brightness.dark;
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         title: Text(isUrdu ? 'تسبیح' : 'Tasbeeh'),
-        backgroundColor: primaryColor,
+        backgroundColor: primary,
         foregroundColor: Colors.white,
         elevation: 0,
         actions: [
           IconButton(
-            icon: const Text('🤲', style: TextStyle(fontSize: 22)),
-            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => GuidanceScreen())),
-            tooltip: isUrdu ? 'اذکار اور دعائیں' : 'Dhikr & Duas',
+            icon: const Text('🤲', style: TextStyle(fontSize: 20)),
+            onPressed: () => Navigator.push(context,
+                MaterialPageRoute(builder: (_) => GuidanceScreen())),
           ),
         ],
         bottom: TabBar(
@@ -288,117 +313,228 @@ class _TasbeehScreenState extends State<TasbeehScreen>
           indicatorColor: Colors.white,
           indicatorWeight: 3,
           labelColor: Colors.white,
-          unselectedLabelColor: Colors.white60,
-          labelStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
-          unselectedLabelStyle: const TextStyle(fontSize: 15),
+          unselectedLabelColor: Colors.white54,
+          labelStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
           tabs: [
-            Tab(icon: const Icon(Icons.radio_button_checked, size: 18), text: isUrdu ? 'تسبیح' : 'Counter'),
-            Tab(icon: const Icon(Icons.auto_awesome, size: 18), text: isUrdu ? '۹۹ نام' : '99 Names'),
+            Tab(icon: const Icon(Icons.radio_button_checked_rounded, size: 17),
+                text: isUrdu ? 'تسبیح' : 'Counter'),
+            Tab(icon: const Icon(Icons.auto_awesome_rounded, size: 17),
+                text: isUrdu ? '۹۹ نام' : '99 Names'),
           ],
         ),
       ),
       body: TabBarView(
         controller: _tabController,
         children: [
-          _buildCounterTab(isUrdu, primaryColor, isDark),
-          _buildNamesTab(isUrdu, primaryColor, isDark),
+          _buildCounterTab(isUrdu, primary, isDark),
+          _buildNamesTab(isUrdu, primary, isDark),
         ],
       ),
     );
   }
 
-  Widget _buildCounterTab(bool isUrdu, Color primaryColor, bool isDark) {
-    final cardColor = Theme.of(context).cardColor;
-    final textSecondary = Theme.of(context).textTheme.bodyMedium?.color ?? Colors.black54;
+  // ── Tab 1: Counter ─────────────────────────────────────────────────────────
+
+  Widget _buildCounterTab(bool isUrdu, Color primary, bool isDark) {
+    final cardColor  = Theme.of(context).cardColor;
+    final textSec    = Theme.of(context).textTheme.bodyMedium?.color ?? Colors.black54;
+    final textPri    = Theme.of(context).textTheme.bodyLarge?.color ?? Colors.black87;
+    final preset     = _selectedPreset >= 0 ? _dhikrPresets[_selectedPreset] : null;
+    final progress   = _counter / _target;
+    final isDone     = _counter == _target;
 
     return SingleChildScrollView(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+      physics: const BouncingScrollPhysics(),
+      padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
       child: Column(children: [
-        SizedBox(
-          height: 38,
-          child: ListView.separated(
-            scrollDirection: Axis.horizontal,
-            itemCount: _presets.length,
-            separatorBuilder: (_, __) => const SizedBox(width: 8),
-            itemBuilder: (context, i) {
-              final selected = _selectedPreset == i;
-              return ChoiceChip(
-                label: Text(
-                  isUrdu ? _presets[i]['urdu'] as String : _presets[i]['label'] as String,
-                  style: TextStyle(fontSize: 12, fontWeight: selected ? FontWeight.w600 : FontWeight.normal, color: selected ? Colors.white : textSecondary),
+
+        // ── Selected dhikr banner ─────────────────────────────────────
+        GestureDetector(
+          onTap: () => _openDhikrPicker(isUrdu, primary),
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+            decoration: BoxDecoration(
+              color: primary.withOpacity(isDark ? 0.2 : 0.07),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: primary.withOpacity(0.2)),
+            ),
+            child: Row(children: [
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(
+                  preset != null
+                      ? (isUrdu ? preset['urdu'] as String : preset['label'] as String)
+                      : (isUrdu ? 'کسٹم' : 'Custom'),
+                  style: TextStyle(fontSize: 13, color: textSec),
                 ),
-                selected: selected,
-                onSelected: (_) => _selectPreset(i),
-                selectedColor: primaryColor,
-                backgroundColor: isDark ? Colors.white10 : Colors.grey.shade100,
-                side: BorderSide(color: selected ? primaryColor : Colors.grey.withOpacity(0.3)),
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 0),
-              );
-            },
+                const SizedBox(height: 2),
+                Text(
+                  preset != null ? preset['arabic'] as String : '—',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold,
+                      color: primary, fontFamily: 'serif'),
+                ),
+              ])),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                  color: primary.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Text(isUrdu ? 'تبدیل کریں' : 'Change',
+                      style: TextStyle(fontSize: 12, color: primary, fontWeight: FontWeight.w500)),
+                  const SizedBox(width: 4),
+                  Icon(Icons.keyboard_arrow_down_rounded, size: 16, color: primary),
+                ]),
+              ),
+            ]),
           ),
         ),
-        const SizedBox(height: 28),
+
+        const SizedBox(height: 32),
+
+        // ── Ring counter — tap to count ───────────────────────────────
         GestureDetector(
           onTap: _increment,
           child: ScaleTransition(
             scale: _pulseAnim,
             child: SizedBox(
-              width: 240, height: 240,
+              width: 220, height: 220,
               child: CustomPaint(
-                painter: _RingPainter(progress: _animatedProgress, primaryColor: primaryColor, trackColor: isDark ? Colors.white12 : Colors.grey.shade200),
+                painter: _RingPainter(
+                  progress: _animatedProgress,
+                  primaryColor: isDone ? Colors.green : primary,
+                  trackColor: isDark ? Colors.white10 : Colors.grey.shade100,
+                ),
                 child: Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
-                  Text('$_counter', style: TextStyle(fontSize: 72, fontWeight: FontWeight.bold, color: primaryColor, height: 1)),
-                  const SizedBox(height: 4),
-                  Row(mainAxisSize: MainAxisSize.min, children: [
-                    Text(isUrdu ? 'حد: ' : 'of ', style: TextStyle(fontSize: 14, color: textSecondary)),
-                    GestureDetector(
-                      onTap: _setCustomTarget,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                        decoration: BoxDecoration(color: primaryColor.withOpacity(0.1), borderRadius: BorderRadius.circular(20), border: Border.all(color: primaryColor.withOpacity(0.4))),
-                        child: Row(mainAxisSize: MainAxisSize.min, children: [
-                          Text('$_target', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: primaryColor)),
-                          const SizedBox(width: 3),
-                          Icon(Icons.edit, size: 11, color: primaryColor),
-                        ]),
-                      ),
+                  Text(
+                    '$_counter',
+                    style: TextStyle(
+                      fontSize: 68,
+                      fontWeight: FontWeight.bold,
+                      color: isDone ? Colors.green : primary,
+                      height: 1,
                     ),
-                  ]),
+                  ),
+                  const SizedBox(height: 6),
+                  GestureDetector(
+                    onTap: () => _setCustomTarget(isUrdu),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: primary.withOpacity(0.08),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: primary.withOpacity(0.25)),
+                      ),
+                      child: Row(mainAxisSize: MainAxisSize.min, children: [
+                        Text(
+                          '/ $_target',
+                          style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: primary),
+                        ),
+                        const SizedBox(width: 4),
+                        Icon(Icons.edit_rounded, size: 10, color: primary),
+                      ]),
+                    ),
+                  ),
                 ])),
               ),
             ),
           ),
         ),
-        const SizedBox(height: 8),
-        Text(isUrdu ? 'گنتی کے لیے دائرے کو ٹیپ کریں' : 'Tap the circle to count', style: TextStyle(fontSize: 13, color: textSecondary)),
+
+        const SizedBox(height: 10),
+        Text(
+          isUrdu ? 'گنتی کے لیے دائرے کو ٹیپ کریں' : 'Tap the ring to count',
+          style: TextStyle(fontSize: 12, color: textSec),
+        ),
+
         const SizedBox(height: 28),
+
+        // ── Progress + stat row ────────────────────────────────────────
         Row(children: [
-          _statCard(isUrdu ? 'باقی' : 'Remaining', '${_target - _counter}', primaryColor.withOpacity(0.08), primaryColor),
-          const SizedBox(width: 12),
-          _statCard(isUrdu ? 'تکمیل' : 'Complete', '${(_counter / _target * 100).toStringAsFixed(0)}%', _counter == _target ? Colors.green.withOpacity(0.12) : primaryColor.withOpacity(0.08), _counter == _target ? Colors.green : primaryColor),
+          _statTile(
+            isUrdu ? 'باقی' : 'Remaining',
+            '${_target - _counter}',
+            primary, isDark, isDone: false,
+          ),
+          const SizedBox(width: 10),
+          _statTile(
+            isUrdu ? 'مکمل' : 'Complete',
+            '${(progress * 100).toStringAsFixed(0)}%',
+            isDone ? Colors.green : primary, isDark,
+            isDone: isDone,
+          ),
+          const SizedBox(width: 10),
+          _statTile(
+            isUrdu ? 'ہدف' : 'Target',
+            '$_target',
+            primary, isDark, isDone: false,
+          ),
         ]),
+
         const SizedBox(height: 24),
+
+        // ── Action buttons ─────────────────────────────────────────────
         Row(children: [
-          Expanded(child: OutlinedButton.icon(
-            onPressed: _reset,
-            icon: const Icon(Icons.refresh_rounded, size: 18),
-            label: Text(isUrdu ? 'ری سیٹ' : 'Reset'),
-            style: OutlinedButton.styleFrom(foregroundColor: textSecondary, side: BorderSide(color: Colors.grey.withOpacity(0.4)), padding: const EdgeInsets.symmetric(vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
-          )),
+          Expanded(
+            child: OutlinedButton.icon(
+              onPressed: _reset,
+              icon: const Icon(Icons.refresh_rounded, size: 18),
+              label: Text(isUrdu ? 'ری سیٹ' : 'Reset'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: textSec,
+                side: BorderSide(color: Colors.grey.withOpacity(0.35)),
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              ),
+            ),
+          ),
           const SizedBox(width: 12),
-          Expanded(flex: 2, child: ElevatedButton.icon(
-            onPressed: _increment,
-            icon: const Icon(Icons.add_rounded, size: 20),
-            label: Text(isUrdu ? 'ایک بڑھائیں' : 'Add Count'),
-            style: ElevatedButton.styleFrom(backgroundColor: primaryColor, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)), elevation: 0),
-          )),
+          Expanded(
+            flex: 2,
+            child: ElevatedButton.icon(
+              onPressed: _increment,
+              icon: const Icon(Icons.add_rounded, size: 20),
+              label: Text(isUrdu ? 'ایک بڑھائیں' : 'Add Count'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: isDone ? Colors.green : primary,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                elevation: 0,
+              ),
+            ),
+          ),
         ]),
       ]),
     );
   }
 
-  Widget _buildNamesTab(bool isUrdu, Color primaryColor, bool isDark) {
-    final textSecondary = Theme.of(context).textTheme.bodyMedium?.color ?? Colors.black54;
+  Widget _statTile(String label, String value, Color color, bool isDark,
+      {required bool isDone}) {
+    return Expanded(child: Container(
+      padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 10),
+      decoration: BoxDecoration(
+        color: isDone
+            ? Colors.green.withOpacity(isDark ? 0.15 : 0.08)
+            : color.withOpacity(isDark ? 0.15 : 0.07),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(children: [
+        Text(value,
+            style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: color)),
+        const SizedBox(height: 2),
+        Text(label,
+            style: TextStyle(fontSize: 10, color: color.withOpacity(0.7)),
+            textAlign: TextAlign.center),
+      ]),
+    ));
+  }
+
+  // ── Tab 2: 99 Names ────────────────────────────────────────────────────────
+
+  Widget _buildNamesTab(bool isUrdu, Color primary, bool isDark) {
+    final textSec  = Theme.of(context).textTheme.bodyMedium?.color ?? Colors.black54;
     final cardColor = Theme.of(context).cardColor;
     final filtered = _namesSearch.isEmpty
         ? _allahNames
@@ -408,52 +544,80 @@ class _TasbeehScreenState extends State<TasbeehScreen>
             n['urdu']!.contains(_namesSearch)).toList();
 
     return Column(children: [
+      // Search bar
       Padding(
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
         child: TextField(
           controller: _searchController,
           onChanged: (v) => setState(() => _namesSearch = v),
           decoration: InputDecoration(
             hintText: isUrdu ? 'نام تلاش کریں...' : 'Search names...',
-            prefixIcon: Icon(Icons.search, color: primaryColor),
+            prefixIcon: Icon(Icons.search_rounded, color: primary),
             suffixIcon: _namesSearch.isNotEmpty
-                ? IconButton(icon: const Icon(Icons.clear), onPressed: () { _searchController.clear(); setState(() => _namesSearch = ''); })
+                ? IconButton(
+                    icon: const Icon(Icons.clear_rounded),
+                    onPressed: () {
+                      _searchController.clear();
+                      setState(() => _namesSearch = '');
+                    })
                 : null,
             filled: true,
-            fillColor: primaryColor.withOpacity(0.06),
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
-            contentPadding: const EdgeInsets.symmetric(vertical: 0, horizontal: 16),
+            fillColor: primary.withOpacity(0.06),
+            border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
           ),
         ),
       ),
       Padding(
-        padding: const EdgeInsets.only(bottom: 8),
-        child: Text(isUrdu ? '${filtered.length} نام' : '${filtered.length} names', style: TextStyle(fontSize: 12, color: textSecondary)),
+        padding: const EdgeInsets.only(bottom: 6),
+        child: Text(
+          isUrdu ? '${filtered.length} نام' : '${filtered.length} names',
+          style: TextStyle(fontSize: 11, color: textSec),
+        ),
       ),
       Expanded(
         child: GridView.builder(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
           itemCount: filtered.length,
-          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 2, mainAxisSpacing: 10, crossAxisSpacing: 10, childAspectRatio: 1.5),
-          itemBuilder: (context, index) {
-            final name = filtered[index];
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 2, mainAxisSpacing: 10,
+              crossAxisSpacing: 10, childAspectRatio: 1.5),
+          itemBuilder: (ctx, i) {
+            final name   = filtered[i];
             final number = _allahNames.indexOf(name) + 1;
             return Container(
               padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(color: cardColor, borderRadius: BorderRadius.circular(16), border: Border.all(color: primaryColor.withOpacity(0.15))),
+              decoration: BoxDecoration(
+                color: cardColor,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: primary.withOpacity(0.13)),
+                boxShadow: [BoxShadow(
+                    color: Colors.black.withOpacity(isDark ? 0.1 : 0.04),
+                    blurRadius: 6, offset: const Offset(0, 2))],
+              ),
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                  decoration: BoxDecoration(color: primaryColor.withOpacity(0.12), borderRadius: BorderRadius.circular(8)),
-                  child: Text('$number', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: primaryColor)),
+                  decoration: BoxDecoration(
+                      color: primary.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8)),
+                  child: Text('$number',
+                      style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: primary)),
                 ),
                 const SizedBox(height: 6),
                 Expanded(child: Align(
                   alignment: Alignment.centerRight,
-                  child: Text(name['arabic']!, textAlign: TextAlign.right, style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: primaryColor, height: 1.3), maxLines: 2, overflow: TextOverflow.ellipsis),
+                  child: Text(name['arabic']!,
+                      textAlign: TextAlign.right,
+                      style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold,
+                          color: primary, height: 1.3),
+                      maxLines: 2, overflow: TextOverflow.ellipsis),
                 )),
-                const SizedBox(height: 4),
-                Text(isUrdu ? name['urdu']! : name['english']!, style: TextStyle(fontSize: 11, color: textSecondary), maxLines: 1, overflow: TextOverflow.ellipsis),
+                const SizedBox(height: 3),
+                Text(isUrdu ? name['urdu']! : name['english']!,
+                    style: TextStyle(fontSize: 10, color: textSec),
+                    maxLines: 1, overflow: TextOverflow.ellipsis),
               ]),
             );
           },
@@ -461,19 +625,143 @@ class _TasbeehScreenState extends State<TasbeehScreen>
       ),
     ]);
   }
+}
 
-  Widget _statCard(String label, String value, Color bgColor, Color valueColor) {
-    return Expanded(child: Container(
-      padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
-      decoration: BoxDecoration(color: bgColor, borderRadius: BorderRadius.circular(16)),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(label, style: TextStyle(fontSize: 12, color: valueColor.withOpacity(0.7), fontWeight: FontWeight.w500)),
-        const SizedBox(height: 4),
-        Text(value, style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: valueColor)),
+// ─────────────────────────────────────────────────────────────────────────────
+// Dhikr picker — bottom sheet
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _DhikrPickerSheet extends StatefulWidget {
+  final bool isUrdu;
+  final Color primary;
+  final Color cardColor;
+  final int selected;
+  final List<Map<String, dynamic>> presets;
+
+  const _DhikrPickerSheet({
+    required this.isUrdu, required this.primary, required this.cardColor,
+    required this.selected, required this.presets,
+  });
+
+  @override
+  State<_DhikrPickerSheet> createState() => _DhikrPickerSheetState();
+}
+
+class _DhikrPickerSheetState extends State<_DhikrPickerSheet> {
+  late int _sel;
+  @override void initState() { super.initState(); _sel = widget.selected; }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark   = Theme.of(context).brightness == Brightness.dark;
+    final textPri  = Theme.of(context).textTheme.bodyLarge?.color ?? Colors.black87;
+    final textSec  = Theme.of(context).textTheme.bodyMedium?.color ?? Colors.black54;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: widget.cardColor,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      padding: const EdgeInsets.only(bottom: 32),
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        // Handle
+        Container(
+          margin: const EdgeInsets.symmetric(vertical: 12),
+          width: 40, height: 4,
+          decoration: BoxDecoration(
+              color: Colors.grey.withOpacity(0.3), borderRadius: BorderRadius.circular(2)),
+        ),
+
+        Padding(
+          padding: const EdgeInsets.fromLTRB(24, 0, 24, 16),
+          child: Row(children: [
+            Text(widget.isUrdu ? 'ذکر منتخب کریں' : 'Select Dhikr',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: textPri)),
+          ]),
+        ),
+
+        // Dhikr list
+        ...widget.presets.asMap().entries.map((entry) {
+          final i     = entry.key;
+          final p     = entry.value;
+          final sel   = _sel == i;
+          return GestureDetector(
+            onTap: () { HapticFeedback.selectionClick(); setState(() => _sel = i); },
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 160),
+              margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+              decoration: BoxDecoration(
+                color: sel
+                    ? widget.primary.withOpacity(isDark ? 0.25 : 0.08)
+                    : isDark ? Colors.white.withOpacity(0.04) : Colors.grey.shade50,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: sel ? widget.primary : Colors.grey.withOpacity(0.18),
+                  width: sel ? 1.5 : 1,
+                ),
+              ),
+              child: Row(children: [
+                // Arabic text
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(
+                    p['arabic'] as String,
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold,
+                        color: sel ? widget.primary : textPri),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    widget.isUrdu ? p['urdu'] as String : p['label'] as String,
+                    style: TextStyle(fontSize: 12, color: textSec),
+                  ),
+                ])),
+                // Count badge
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: sel ? widget.primary : widget.primary.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text('× ${p['count']}',
+                      style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: sel ? Colors.white : widget.primary)),
+                ),
+                if (sel) ...[
+                  const SizedBox(width: 8),
+                  Icon(Icons.check_circle_rounded, color: widget.primary, size: 20),
+                ],
+              ]),
+            ),
+          );
+        }).toList(),
+
+        const SizedBox(height: 8),
+
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: ElevatedButton(
+            onPressed: () => Navigator.pop(context, _sel),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: widget.primary,
+              foregroundColor: Colors.white,
+              minimumSize: const Size(double.infinity, 52),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              elevation: 0,
+            ),
+            child: Text(widget.isUrdu ? 'منتخب کریں' : 'Select',
+                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+          ),
+        ),
       ]),
-    ));
+    );
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Ring painter
+// ─────────────────────────────────────────────────────────────────────────────
 
 class _RingPainter extends CustomPainter {
   final double progress;
@@ -484,14 +772,20 @@ class _RingPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final center = Offset(size.width / 2, size.height / 2);
-    final radius = size.width / 2 - 12;
-    const strokeWidth = 14.0;
-    canvas.drawCircle(center, radius, Paint()..color = trackColor..style = PaintingStyle.stroke..strokeWidth = strokeWidth..strokeCap = StrokeCap.round);
+    final radius = size.width / 2 - 14;
+    const sw = 13.0;
+    canvas.drawCircle(center, radius,
+        Paint()..color = trackColor..style = PaintingStyle.stroke..strokeWidth = sw..strokeCap = StrokeCap.round);
     if (progress > 0) {
-      canvas.drawArc(Rect.fromCircle(center: center, radius: radius), -pi / 2, 2 * pi * progress, false, Paint()..color = primaryColor..style = PaintingStyle.stroke..strokeWidth = strokeWidth..strokeCap = StrokeCap.round);
+      canvas.drawArc(
+        Rect.fromCircle(center: center, radius: radius),
+        -pi / 2, 2 * pi * progress, false,
+        Paint()..color = primaryColor..style = PaintingStyle.stroke..strokeWidth = sw..strokeCap = StrokeCap.round,
+      );
     }
   }
 
   @override
-  bool shouldRepaint(covariant _RingPainter old) => old.progress != progress || old.primaryColor != primaryColor;
+  bool shouldRepaint(covariant _RingPainter o) =>
+      o.progress != progress || o.primaryColor != primaryColor;
 }
