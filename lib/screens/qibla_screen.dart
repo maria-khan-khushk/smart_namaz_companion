@@ -5,7 +5,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
-import 'package:sensors_plus/sensors_plus.dart';
+import 'package:flutter_compass/flutter_compass.dart';
 import '../providers/language_provider.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -40,11 +40,8 @@ class _QiblaScreenState extends State<QiblaScreen>
   String _errorMessage = '';
   Position? _currentPosition;
 
-  final List<double> _headingBuffer = [];
-  static const int _bufferSize = 3; // smaller = less lag
-  final List<dynamic> _streamSubscriptions = [];
-  double _ax = 0, _ay = 0, _az = 0;
-  double _mx = 0, _my = 0, _mz = 0;
+  // Compass stream subscription
+  dynamic _compassSubscription;
 
   late AnimationController _animController;
   late Animation<double> _animation;
@@ -74,12 +71,12 @@ class _QiblaScreenState extends State<QiblaScreen>
       CurvedAnimation(parent: _animController, curve: Curves.easeOut),
     );
     _checkPermissionsAndGetLocation();
-    _startSensors();
+    _startCompass();
   }
 
   @override
   void dispose() {
-    for (final sub in _streamSubscriptions) sub.cancel();
+    _compassSubscription?.cancel();
     _animController.dispose();
     super.dispose();
   }
@@ -88,82 +85,40 @@ class _QiblaScreenState extends State<QiblaScreen>
   // Sensors
   // ─────────────────────────────────────────────────────────────────────────
 
-  // Throttle: update UI at most every 80ms (~12fps) — smooth but not heavy
-  DateTime _lastSensorUpdate = DateTime.fromMillisecondsSinceEpoch(0);
+  // ── flutter_compass: uses Android SensorManager.getOrientation() ──────────
+  // This is the correct way — handles all tilt/orientation automatically.
 
-  void _startSensors() {
-    _streamSubscriptions.add(
-      accelerometerEventStream().listen((e) {
-        _ax = e.x; _ay = e.y; _az = e.z;
-        _computeHeading();
-      }),
-    );
-    _streamSubscriptions.add(
-      magnetometerEventStream().listen((e) {
-        _mx = e.x; _my = e.y; _mz = e.z;
-        _computeHeading();
-      }),
-    );
-  }
-
-  /// Computes tilt-compensated heading from raw sensor values.
-  /// Updates UI and animates arrow at most every 80ms.
-  void _computeHeading() {
-    final norm = sqrt(_ax * _ax + _ay * _ay + _az * _az);
-    if (norm == 0) return;
-
-    final ax = _ax / norm, ay = _ay / norm, az = _az / norm;
-    final pitch = asin(-ax.clamp(-1.0, 1.0));
-    final roll  = atan2(ay, az);
-
-    final mxComp = _mx * cos(pitch) + _mz * sin(pitch);
-    final myComp = _mx * sin(roll) * sin(pitch)
-        + _my * cos(roll)
-        - _mz * sin(roll) * cos(pitch);
-
-    double heading = atan2(-myComp, mxComp) * 180 / pi;
-    heading = (heading + 360) % 360;
-
-    // Keep a small circular-mean buffer (3 samples) for minimal smoothing
-    _headingBuffer.add(heading);
-    if (_headingBuffer.length > _bufferSize) _headingBuffer.removeAt(0);
-
-    // Throttle UI updates to ~80ms
-    final now = DateTime.now();
-    if (now.difference(_lastSensorUpdate).inMilliseconds < 80) return;
-    _lastSensorUpdate = now;
-
-    final smoothed = _circularMean(_headingBuffer);
-
-    if (!mounted) return;
-
-    // Calculate arrow angle BEFORE setState so we use the new heading value
-    final targetAngle = (_qiblaBearing - smoothed) * pi / 180;
-    double diff = targetAngle - _lastArrowAngle;
-    while (diff > pi)  diff -= 2 * pi;
-    while (diff < -pi) diff += 2 * pi;
-    final newTarget = _lastArrowAngle + diff;
-
-    // Only update if heading changed meaningfully (>0.5 degrees)
-    if (diff.abs() < 0.009) return; // 0.009 rad ≈ 0.5°
-
-    _animation = Tween<double>(begin: _lastArrowAngle, end: newTarget).animate(
-      CurvedAnimation(parent: _animController, curve: Curves.linear),
-    );
-    _animController.forward(from: 0);
-    _lastArrowAngle = newTarget;
-
-    setState(() => _deviceHeading = smoothed);
-  }
-
-  double _circularMean(List<double> angles) {
-    double sinSum = 0, cosSum = 0;
-    for (final a in angles) {
-      sinSum += sin(a * pi / 180);
-      cosSum += cos(a * pi / 180);
+  void _startCompass() {
+    // Check if compass is available on this device
+    if (FlutterCompass.events == null) {
+      setState(() => _errorMessage = 'Compass sensor not available on this device.');
+      return;
     }
-    final mean = atan2(sinSum / angles.length, cosSum / angles.length) * 180 / pi;
-    return (mean + 360) % 360;
+
+    _compassSubscription = FlutterCompass.events!.listen((CompassEvent event) {
+      final heading = event.heading;
+      if (heading == null || !mounted) return;
+
+      // heading is 0–360, where 0 = North
+      // Arrow angle = how much to rotate from pointing up (North) to point at Qibla
+      final targetAngle = (_qiblaBearing - heading) * pi / 180;
+      double diff = targetAngle - _lastArrowAngle;
+      while (diff > pi)  diff -= 2 * pi;
+      while (diff < -pi) diff += 2 * pi;
+
+      // Skip tiny changes to avoid jitter when phone is still
+      if (diff.abs() < 0.008) return;
+
+      final newTarget = _lastArrowAngle + diff;
+
+      _animation = Tween<double>(begin: _lastArrowAngle, end: newTarget).animate(
+        CurvedAnimation(parent: _animController, curve: Curves.easeOut),
+      );
+      _animController.forward(from: 0);
+      _lastArrowAngle = newTarget;
+
+      setState(() => _deviceHeading = (heading + 360) % 360);
+    });
   }
 
   // ─────────────────────────────────────────────────────────────────────────

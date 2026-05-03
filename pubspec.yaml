@@ -23,7 +23,7 @@ dependencies:
   sensors_plus: ^6.0.1 
   geolocator: ^13.0.2              # Get user's current GPS location (latitude/longitude)
   permission_handler: ^11.3.1      # Request location permission (Android/iOS)
-
+  flutter_compass: ^0.8.0
   # ========== Networking & API ==========
   http: ^1.1.0                     # Fetch prayer times from Aladhan API
 
