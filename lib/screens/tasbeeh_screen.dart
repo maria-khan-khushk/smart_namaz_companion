@@ -2,6 +2,14 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:proximity_sensor/proximity_sensor.dart';
+import 'package:flutter_tts/flutter_tts.dart';
+import 'package:vibration/vibration.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
+import 'package:sensors_plus/sensors_plus.dart';
+import 'package:audioplayers/audioplayers.dart';
+import 'dart:async';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../providers/language_provider.dart';
 import 'guidance_screen.dart';
 
@@ -110,11 +118,11 @@ const List<Map<String, String>> _allahNames = [
 
 // ── Dhikr presets (no chips — selected via bottom sheet) ─────────────────────
 const List<Map<String, dynamic>> _dhikrPresets = [
-  {'arabic': 'سُبْحَانَ اللّٰہ',  'label': 'SubhanAllah',    'urdu': 'سبحان اللہ',    'count': 33},
-  {'arabic': 'اَلْحَمْدُ لِلّٰہ', 'label': 'Alhamdulillah',  'urdu': 'الحمد للہ',     'count': 33},
-  {'arabic': 'اَللّٰہُ اَکْبَر',  'label': 'AllahuAkbar',    'urdu': 'اللہ اکبر',     'count': 34},
-  {'arabic': 'اَسْتَغْفِرُاللّٰہ','label': 'Astaghfirullah', 'urdu': 'استغفر اللہ',   'count': 100},
-  {'arabic': 'لَا إِلٰهَ إِلَّا اللّٰہ', 'label': 'La ilaha illallah', 'urdu': 'لا الہ الا اللہ', 'count': 100},
+  {'arabic': 'سبحان الله',  'label': 'SubhanAllah',    'urdu': 'سبحان اللہ',    'count': 33},
+  {'arabic': 'الحمد لله', 'label': 'Alhamdulillah',  'urdu': 'الحمد للہ',     'count': 33},
+  {'arabic': 'الله أكبر',  'label': 'AllahuAkbar',    'urdu': 'اللہ اکبر',     'count': 34},
+  {'arabic': 'أستغفر الله','label': 'Astaghfirullah', 'urdu': 'استغفر اللہ',   'count': 100},
+  {'arabic': 'لا إله إلا الله', 'label': 'La ilaha illallah', 'urdu': 'لا الہ الا اللہ', 'count': 100},
 ];
 
 class TasbeehScreen extends StatefulWidget {
@@ -123,7 +131,7 @@ class TasbeehScreen extends StatefulWidget {
 }
 
 class _TasbeehScreenState extends State<TasbeehScreen>
-    with TickerProviderStateMixin {
+    with TickerProviderStateMixin, WidgetsBindingObserver {
   late TabController _tabController;
 
   // Counter state
@@ -138,10 +146,27 @@ class _TasbeehScreenState extends State<TasbeehScreen>
   late Animation<double>   _pulseAnim;
   late Animation<double>   _progressAnim;
   double _animatedProgress = 0;
+  
+  // Enhancement state
+  bool _isProximityEnabled = false;
+  bool _isTtsEnabled = false;
+  bool _isVibrationEnabled = true;
+  bool _isBackgroundEnabled = false;
+  late FlutterTts _tts;
+  StreamSubscription? _proximitySub;
+  StreamSubscription? _volumeSub;
+  final AudioPlayer _silentPlayer = AudioPlayer();
+  bool _proximityHandNearby = false;
+  bool _isTtsReady = false;
+  bool _isShakeEnabled = false;
+  bool _isTtsSpeakDhikr = false;
+  StreamSubscription? _shakeSub;
+  DateTime? _lastShake;
 
   // 99 Names search
   String _namesSearch = '';
   final TextEditingController _searchController = TextEditingController();
+  late FocusNode _focusNode;
 
   @override
   void initState() {
@@ -158,14 +183,139 @@ class _TasbeehScreenState extends State<TasbeehScreen>
     _progressAnim = Tween<double>(begin: 0, end: 0).animate(
         CurvedAnimation(parent: _progressController, curve: Curves.easeOut))
       ..addListener(() => setState(() => _animatedProgress = _progressAnim.value));
+
+    _focusNode = FocusNode();
+    WidgetsBinding.instance.addObserver(this);
+    _loadState();
+    _initTts();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      // Refresh UI when coming back to foreground
+      setState(() {});
+      _animateProgress(_counter / _target);
+    }
+  }
+
+  Future<void> _loadState() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _counter = prefs.getInt('tasbeeh_counter') ?? 0;
+      _isTtsEnabled = prefs.getBool('tasbeeh_tts') ?? false;
+      _isVibrationEnabled = prefs.getBool('tasbeeh_vibration') ?? true;
+      _isTtsSpeakDhikr = prefs.getBool('tasbeeh_tts_dhikr') ?? false;
+      // We don't auto-enable background mode for safety, but we could if desired.
+    });
+    _animateProgress(_counter / _target);
+  }
+
+  Future<void> _saveState() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('tasbeeh_counter', _counter);
+    await prefs.setBool('tasbeeh_tts', _isTtsEnabled);
+    await prefs.setBool('tasbeeh_vibration', _isVibrationEnabled);
+    await prefs.setBool('tasbeeh_tts_dhikr', _isTtsSpeakDhikr);
+  }
+
+  void _toggleBackgroundMode(bool enabled) async {
+    setState(() => _isBackgroundEnabled = enabled);
+    if (enabled) {
+      WakelockPlus.enable();
+    } else {
+      WakelockPlus.disable();
+    }
+  }
+
+  void _toggleShake(bool enabled) {
+    setState(() => _isShakeEnabled = enabled);
+    _shakeSub?.cancel();
+    if (enabled) {
+      // Listen to accelerometer for shake
+      _shakeSub = userAccelerometerEvents.listen((UserAccelerometerEvent event) {
+        // Simple shake detection logic
+        double acceleration = sqrt(event.x * event.x + event.y * event.y + event.z * event.z);
+        if (acceleration > 12.0) { // Sensitivity threshold
+          final now = DateTime.now();
+          if (_lastShake == null || now.difference(_lastShake!).inMilliseconds > 800) {
+            _increment();
+            _lastShake = now;
+          }
+        }
+      });
+    }
+  }
+
+  Future<void> _initTts() async {
+    try {
+      _tts = FlutterTts();
+      await _tts.setPitch(1.0);
+      await _tts.setSpeechRate(0.5);
+      await _tts.setVolume(1.0);
+      
+      _tts.setCompletionHandler(() {});
+      _tts.setErrorHandler((msg) {
+        debugPrint("TTS Error: $msg");
+      });
+
+      // Warm up engines
+      if (Theme.of(context).platform == TargetPlatform.android) {
+        await _tts.setEngine("com.google.android.tts");
+      }
+      
+      setState(() => _isTtsReady = true);
+    } catch (e) {
+      debugPrint("TTS Initialization error: $e");
+      _isTtsReady = false;
+    }
+  }
+
+  void _toggleProximity(bool enabled) {
+    setState(() => _isProximityEnabled = enabled);
+    _proximitySub?.cancel();
+    if (enabled) {
+      _proximitySub = ProximitySensor.events.listen((int event) {
+        // Event 1 = hand nearby, 0 = hand away
+        if (event == 1) {
+          if (!_proximityHandNearby) {
+            _increment();
+            _proximityHandNearby = true;
+          }
+        } else {
+          _proximityHandNearby = false;
+        }
+      });
+    }
+  }
+
+  Future<void> _speak(String text, {String? lang}) async {
+    if (_isTtsEnabled && _isTtsReady) {
+      await _tts.stop();
+      if (lang != null) {
+        await _tts.setLanguage(lang);
+      } else {
+        // Auto-detect based on app language if not specified
+        final isUrdu = Provider.of<LanguageProvider>(context, listen: false).isUrdu;
+        await _tts.setLanguage(isUrdu ? "ur-PK" : "en-US");
+      }
+      await _tts.speak(text);
+    }
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _tabController.dispose();
     _pulseController.dispose();
     _progressController.dispose();
     _searchController.dispose();
+    _proximitySub?.cancel();
+    _shakeSub?.cancel();
+    _tts.stop();
+    _silentPlayer.dispose();
+    WakelockPlus.disable();
+    _focusNode.dispose();
     super.dispose();
   }
 
@@ -173,13 +323,62 @@ class _TasbeehScreenState extends State<TasbeehScreen>
 
   void _increment() {
     if (_counter >= _target) return;
-    HapticFeedback.lightImpact();
-    _pulseController.forward().then((_) => _pulseController.reverse());
-    setState(() => _counter++);
-    _animateProgress(_counter / _target);
+    
+    _counter++;
+    _saveState();
+
+    // Only update UI if app is in foreground
+    if (WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed ||
+        WidgetsBinding.instance.lifecycleState == null) {
+      if (_isVibrationEnabled) {
+        Vibration.vibrate(duration: 40, amplitude: 128);
+      } else {
+        HapticFeedback.lightImpact();
+      }
+      _pulseController.forward().then((_) => _pulseController.reverse());
+      setState(() {});
+      _animateProgress(_counter / _target);
+    } else {
+      // In background, just vibrate and update local progress
+      if (_isVibrationEnabled) {
+        Vibration.vibrate(duration: 60, amplitude: 160);
+      }
+      _animatedProgress = _counter / _target;
+    }
+    
+    // TTS for increment
+    if (_counter == _target) {
+      final isUrdu = Provider.of<LanguageProvider>(context, listen: false).isUrdu;
+      _speak(
+        isUrdu ? 'تسبيح مکمل ہوگئی' : 'Tasbeeh Completed', 
+        lang: isUrdu ? "ur-PK" : "en-US"
+      );
+    } else {
+      if (_isTtsSpeakDhikr) {
+        String dhikrText = "";
+        String dhikrLang = "ar-SA"; // Default to Arabic for Dhikr
+        
+        if (_tabController.index == 0 && _selectedPreset >= 0) {
+          dhikrText = _dhikrPresets[_selectedPreset]['arabic'];
+        } else {
+          // Default or 99 Names
+          dhikrText = "يا الله"; 
+        }
+        _speak(dhikrText, lang: dhikrLang);
+      } else {
+        final isUrdu = Provider.of<LanguageProvider>(context, listen: false).isUrdu;
+        _speak(_counter.toString(), lang: isUrdu ? "ur-PK" : "en-US");
+      }
+    }
+
     if (_counter == _target && !_targetReachedShown) {
       _targetReachedShown = true;
-      HapticFeedback.mediumImpact();
+      if (_isVibrationEnabled) {
+        Vibration.vibrate(pattern: [0, 200, 100, 200]);
+      } else {
+        HapticFeedback.mediumImpact();
+      }
+      _speak("Mashallah! Tasbeeh complete");
       _showCompletion();
     }
   }
@@ -296,42 +495,187 @@ class _TasbeehScreenState extends State<TasbeehScreen>
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      appBar: AppBar(
-        title: Text(isUrdu ? 'تسبیح' : 'Tasbeeh'),
-        backgroundColor: primary,
-        foregroundColor: Colors.white,
-        elevation: 0,
-        actions: [
-          IconButton(
-            icon: const Text('🤲', style: TextStyle(fontSize: 20)),
-            onPressed: () => Navigator.push(context,
-                MaterialPageRoute(builder: (_) => GuidanceScreen())),
-          ),
-        ],
-        bottom: TabBar(
-          controller: _tabController,
-          indicatorColor: Colors.white,
-          indicatorWeight: 3,
-          labelColor: Colors.white,
-          unselectedLabelColor: Colors.white54,
-          labelStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-          tabs: [
-            Tab(icon: const Icon(Icons.radio_button_checked_rounded, size: 17),
-                text: isUrdu ? 'تسبیح' : 'Counter'),
-            Tab(icon: const Icon(Icons.auto_awesome_rounded, size: 17),
-                text: isUrdu ? '۹۹ نام' : '99 Names'),
+      appBar: _buildAppBar(isUrdu, primary),
+      body: RawKeyboardListener(
+        focusNode: _focusNode,
+        autofocus: true,
+        onKey: (event) {
+          if (event is RawKeyDownEvent) {
+            if (event.logicalKey == LogicalKeyboardKey.audioVolumeUp || 
+                event.logicalKey == LogicalKeyboardKey.audioVolumeDown) {
+              _increment();
+            }
+          }
+        },
+        child: Column(
+          children: [
+            if (_tabController.index == 0) _buildSettingsBar(isUrdu, primary, isDark),
+            Expanded(
+              child: TabBarView(
+                controller: _tabController,
+                children: [
+                  _buildCounterTab(isUrdu, primary, isDark),
+                  _buildNamesTab(isUrdu, primary, isDark),
+                ],
+              ),
+            ),
           ],
         ),
       ),
-      body: TabBarView(
+    );
+  }
+
+  PreferredSizeWidget _buildAppBar(bool isUrdu, Color primary) {
+    return AppBar(
+      title: Text(isUrdu ? 'تسبیح' : 'Tasbeeh'),
+      backgroundColor: primary,
+      foregroundColor: Colors.white,
+      elevation: 0,
+      actions: [
+        IconButton(
+          icon: const Text('🤲', style: TextStyle(fontSize: 20)),
+          onPressed: () => Navigator.push(context,
+              MaterialPageRoute(builder: (_) => GuidanceScreen())),
+        ),
+      ],
+      bottom: TabBar(
         controller: _tabController,
-        children: [
-          _buildCounterTab(isUrdu, primary, isDark),
-          _buildNamesTab(isUrdu, primary, isDark),
+        indicatorColor: Colors.white,
+        indicatorWeight: 3,
+        labelColor: Colors.white,
+        unselectedLabelColor: Colors.white54,
+        labelStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+        tabs: [
+          Tab(icon: const Icon(Icons.radio_button_checked_rounded, size: 17),
+              text: isUrdu ? 'تسبیح' : 'Counter'),
+          Tab(icon: const Icon(Icons.auto_awesome_rounded, size: 17),
+              text: isUrdu ? '۹۹ نام' : '99 Names'),
         ],
       ),
     );
   }
+
+  Widget _buildSettingsBar(bool isUrdu, Color primary, bool isDark) {
+    return Container(
+      margin: const EdgeInsets.all(12),
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
+      decoration: BoxDecoration(
+        color: isDark ? Colors.white.withOpacity(0.05) : Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(isDark ? 0.3 : 0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          )
+        ],
+        border: Border.all(color: primary.withOpacity(0.1)),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceAround,
+        children: [
+          _settingsToggle(
+            icon: Icons.waves_rounded,
+            active: _isProximityEnabled,
+            onTap: () => _toggleProximity(!_isProximityEnabled),
+            label: isUrdu ? 'وِیو' : 'Wave',
+            tooltip: isUrdu ? 'ہاتھ ہلا کر گنتی کریں (سینسر)' : 'Wave hand over sensor to count',
+            color: primary,
+          ),
+          _settingsToggle(
+            icon: Icons.volume_up_rounded,
+            active: _isTtsEnabled,
+            onTap: () => setState(() => _isTtsEnabled = !_isTtsEnabled),
+            label: isUrdu ? 'آواز' : 'Voice',
+            tooltip: isUrdu ? 'ذکر یا نمبر کی آواز فعال کریں' : 'Enable voice for dhikr or numbers',
+            color: primary,
+          ),
+          _settingsToggle(
+            icon: _isTtsSpeakDhikr ? Icons.text_fields_rounded : Icons.numbers_rounded,
+            active: _isTtsEnabled, 
+            onTap: () {
+              setState(() => _isTtsSpeakDhikr = !_isTtsSpeakDhikr);
+              _saveState();
+            },
+            label: isUrdu 
+              ? (_isTtsSpeakDhikr ? 'ذکر' : 'نمبر') 
+              : (_isTtsSpeakDhikr ? 'Dhikr' : 'Number'),
+            tooltip: isUrdu ? 'ذکر یا نمبر کے درمیان تبدیلی' : 'Switch between speaking Dhikr or Numbers',
+            color: primary,
+          ),
+          _settingsToggle(
+            icon: Icons.vibration_rounded,
+            active: _isVibrationEnabled,
+            onTap: () => setState(() => _isVibrationEnabled = !_isVibrationEnabled),
+            label: isUrdu ? 'تھرتھراہٹ' : 'Haptic',
+            tooltip: isUrdu ? 'گنتی پر موبائل تھرتھراہٹ' : 'Vibrate on each count',
+            color: primary,
+          ),
+          _settingsToggle(
+            icon: Icons.auto_awesome_motion_rounded,
+            active: _isShakeEnabled,
+            onTap: () => _toggleShake(!_isShakeEnabled),
+            label: isUrdu ? 'ہلائیں' : 'Shake',
+            tooltip: isUrdu ? 'موبائل ہلا کر گنتی کریں' : 'Shake phone to count',
+            color: primary,
+          ),
+          _settingsToggle(
+            icon: Icons.phonelink_lock_rounded,
+            active: _isBackgroundEnabled,
+            onTap: () => _toggleBackgroundMode(!_isBackgroundEnabled),
+            label: isUrdu ? 'بیک گراؤنڈ' : 'Background',
+            tooltip: isUrdu ? 'اسکرین بند ہونے پر بھی گنتی جاری رکھیں' : 'Continue counting even with screen off',
+            color: primary,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _settingsToggle({required IconData icon, required bool active, required VoidCallback onTap, required String label, required Color color, String? tooltip}) {
+    return Tooltip(
+      message: tooltip ?? label,
+      preferBelow: false,
+      child: GestureDetector(
+      onTap: onTap,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeOutBack,
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: active ? color : color.withOpacity(0.05),
+              borderRadius: BorderRadius.circular(14),
+              boxShadow: [
+                BoxShadow(
+                  color: active ? color.withOpacity(0.3) : Colors.transparent,
+                  blurRadius: active ? 8 : 0.0001, // Avoid zero blur radius assertion if any
+                  offset: active ? const Offset(0, 3) : Offset.zero,
+                )
+              ],
+            ),
+            child: Icon(
+              icon, 
+              color: active ? Colors.white : color.withOpacity(0.6), 
+              size: 22
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            label, 
+            style: TextStyle(
+              fontSize: 10, 
+              fontWeight: active ? FontWeight.bold : FontWeight.w500, 
+              color: active ? color : Colors.grey
+            )
+          ),
+        ],
+      ),
+    ),
+  );
+}
 
   // ── Tab 1: Counter ─────────────────────────────────────────────────────────
 

@@ -251,9 +251,20 @@ class _HomeScreenState extends State<HomeScreen> {
                   isUrdu ? 'السلام علیکم' : 'Assalamu Alaikum',
                   style: TextStyle(fontSize: 13, color: primaryColor.withOpacity(0.8), fontWeight: FontWeight.w500),
                 ),
-                Text(
-                  isUrdu ? 'نماز کے اوقات' : 'Prayer Times',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: primaryColor),
+                Row(
+                  children: [
+                    Image.asset(
+                      'assets/logo.png',
+                      height: 18,
+                      width: 18,
+                      fit: BoxFit.contain,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      isUrdu ? 'اوقاتِ نماز' : 'Awwab',
+                      style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: primaryColor),
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -597,15 +608,32 @@ class _HomeScreenState extends State<HomeScreen> {
                   ? [primaryColor.withOpacity(0.8), primaryColor.withOpacity(0.6)]
                   : [AppColors.primaryMuted, AppColors.secondaryMuted]),
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.end,
+            child: Row(
               children: [
-                Text(isUrdu ? 'اسمارٹ نماز' : 'Smart Namaz',
-                    style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 4),
-                Text(isUrdu ? 'ساتھی' : 'Companion',
-                    style: const TextStyle(color: Colors.white70, fontSize: 16)),
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Image.asset(
+                    'assets/logo.png',
+                    height: 26,
+                    width: 26,
+                    fit: BoxFit.contain,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(isUrdu ? 'اوّاب' : 'Awwab',
+                        style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
+                    Text(isUrdu ? 'ساتھی' : 'Companion',
+                        style: const TextStyle(color: Colors.white70, fontSize: 14)),
+                  ],
+                ),
               ],
             ),
           ),

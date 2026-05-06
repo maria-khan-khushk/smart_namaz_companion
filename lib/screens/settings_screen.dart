@@ -221,11 +221,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
             child: ListTile(
               leading: Icon(Icons.info_outline, color: AppColors.primaryMuted),
               title: Text(isUrdu ? 'تعارف' : 'About'),
-              subtitle: Text(isUrdu ? 'اسمارٹ نماز ساتھی ورژن 1.0' : 'Smart Namaz Companion v1.0'),
+              subtitle: Text(isUrdu ? 'اوّاب ورژن 1.0' : 'Awwab v1.0'),
               onTap: () {
                 showAboutDialog(
                   context: context,
-                  applicationName: isUrdu ? 'اسمارٹ نماز ساتھی' : 'Smart Namaz Companion',
+                  applicationName: isUrdu ? 'اوّاب' : 'Awwab',
                   applicationVersion: "1.0",
                   applicationLegalese: "© 2025",
                   children: [

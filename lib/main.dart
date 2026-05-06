@@ -1,13 +1,16 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_native_splash/flutter_native_splash.dart';
 import 'package:provider/provider.dart';
 import 'package:android_alarm_manager_plus/android_alarm_manager_plus.dart';
 import 'providers/language_provider.dart';
 import 'utils/theme.dart';
-import 'screens/main_wrapper.dart';
+import 'screens/splash_screen.dart';
 import 'services/notification_service.dart';
 
+
 void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
+  WidgetsBinding widgetsBinding = WidgetsFlutterBinding.ensureInitialized();
+  FlutterNativeSplash.preserve(widgetsBinding: widgetsBinding);
 
   await AndroidAlarmManager.initialize();
   await NotificationService.initialize();
@@ -27,11 +30,11 @@ class MyApp extends StatelessWidget {
       child: Consumer2<ThemeNotifier, LanguageProvider>(
         builder: (context, themeNotifier, languageProvider, child) {
           return MaterialApp(
-            title: 'Smart Namaz Companion',
+            title: 'Awwab',
             theme: AppTheme.lightTheme,
             darkTheme: AppTheme.darkTheme,
             themeMode: themeNotifier.themeMode,
-            home: MainWrapper(),
+            home: SplashScreen(),
             debugShowCheckedModeBanner: false,
           );
         },

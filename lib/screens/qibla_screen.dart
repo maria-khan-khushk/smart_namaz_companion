@@ -7,6 +7,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_compass/flutter_compass.dart';
 import '../providers/language_provider.dart';
+import 'mosque_map_screen.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Mosque model
@@ -149,14 +150,26 @@ class _QiblaScreenState extends State<QiblaScreen>
     }
 
     try {
+      // Use higher frequency and forced manager for initial lock
       final pos = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(accuracy: LocationAccuracy.medium),
-      );
+        locationSettings: AndroidSettings(
+          accuracy: LocationAccuracy.high,
+          forceLocationManager: true,
+          intervalDuration: const Duration(seconds: 1),
+        ),
+      ).timeout(const Duration(seconds: 15), onTimeout: () async {
+        return await Geolocator.getLastKnownPosition() ?? Position(
+          latitude: 24.8934, longitude: 67.0894, // Fallback to Karachi (Bahria University area)
+          timestamp: DateTime.now(), accuracy: 0, altitude: 0,
+          heading: 0, speed: 0, speedAccuracy: 0,
+          altitudeAccuracy: 0, headingAccuracy: 0,
+        );
+      });
       _currentPosition = pos;
       _calculateQiblaBearing(pos.latitude, pos.longitude);
-      setState(() { _hasLocation = true; _isLoading = false; });
+      if (mounted) setState(() { _hasLocation = true; _isLoading = false; });
     } catch (e) {
-      setState(() { _isLoading = false; _errorMessage = 'Failed to get location: $e'; });
+      if (mounted) setState(() { _isLoading = false; _errorMessage = 'Failed to get location: $e'; });
     }
   }
 
@@ -177,6 +190,85 @@ class _QiblaScreenState extends State<QiblaScreen>
     double y = cos(lat1) * sin(lat2) - sin(lat1) * cos(lat2) * cos(dLon);
     double bearing = atan2(x, y) * 180 / pi;
     setState(() => _qiblaBearing = (bearing + 360) % 360);
+  }
+
+  // ── Manual Location Override with Suggestions ───────────────────────────
+  Future<void> _setManualLocation(String query) async {
+    setState(() { _isLoading = true; _errorMessage = ''; });
+    try {
+      final url = 'https://nominatim.openstreetmap.org/search?q=${Uri.encodeComponent(query)}&format=json&limit=5';
+      final resp = await http.get(Uri.parse(url), headers: {'User-Agent': 'SmartNamazCompanion/1.0'});
+      if (resp.statusCode == 200) {
+        final data = jsonDecode(resp.body) as List;
+        if (data.isEmpty) {
+          setState(() { _isLoading = false; _errorMessage = 'No locations found. Try "Karachi".'; });
+          return;
+        }
+
+        setState(() => _isLoading = false);
+
+        // Show suggestions if multiple found, otherwise pick first
+        if (data.length > 1) {
+          _showLocationPicker(data);
+        } else {
+          _applyLocation(data[0]);
+        }
+      }
+    } catch (e) {
+      setState(() { _isLoading = false; _errorMessage = 'Search failed: $e'; });
+    }
+  }
+
+  void _showLocationPicker(List<dynamic> suggestions) {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => Container(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Select exact location:', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 12),
+            Flexible(
+              child: ListView.builder(
+                shrinkWrap: true,
+                itemCount: suggestions.length,
+                itemBuilder: (context, i) {
+                  final s = suggestions[i];
+                  return ListTile(
+                    leading: const Icon(Icons.location_on_outlined),
+                    title: Text(s['display_name'].split(',')[0], style: const TextStyle(fontWeight: FontWeight.bold)),
+                    subtitle: Text(s['display_name'], maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11)),
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      _applyLocation(s);
+                    },
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _applyLocation(Map<String, dynamic> locationData) {
+    final lat = double.parse(locationData['lat']);
+    final lon = double.parse(locationData['lon']);
+    
+    _currentPosition = Position(
+      latitude: lat, longitude: lon,
+      timestamp: DateTime.now(), accuracy: 0, altitude: 0,
+      heading: 0, speed: 0, speedAccuracy: 0,
+      altitudeAccuracy: 0, headingAccuracy: 0,
+    );
+    
+    _calculateQiblaBearing(lat, lon);
+    setState(() => _hasLocation = true);
+    _findNearbyMosques();
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -372,7 +464,19 @@ class _QiblaScreenState extends State<QiblaScreen>
           const SizedBox(height: 16),
           ElevatedButton(
             onPressed: _checkPermissionsAndGetLocation,
-            child: Text(isUrdu ? 'دوبارہ کوشش کریں' : 'Retry'),
+            child: Text(isUrdu ? 'دوبارہ کوشش کریں' : 'Retry GPS'),
+          ),
+          const SizedBox(height: 12),
+          Text(isUrdu ? 'یا دستی طور پر شہر تلاش کریں:' : 'Or search city manually:', style: TextStyle(fontSize: 12, color: textSecondary)),
+          const SizedBox(height: 8),
+          TextField(
+            onSubmitted: (val) => _setManualLocation(val),
+            decoration: InputDecoration(
+              hintText: isUrdu ? 'شہر کا نام لکھیں (مثلاً کراچی)' : 'Enter city (e.g. Karachi)',
+              prefixIcon: const Icon(Icons.search),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+            ),
           ),
         ]),
       ));
@@ -434,6 +538,27 @@ class _QiblaScreenState extends State<QiblaScreen>
               textAlign: TextAlign.center,
               style: TextStyle(fontSize: 15, color: textSecondary),
             ),
+          ),
+          
+          TextButton(
+            onPressed: () {
+              showDialog(
+                context: context,
+                builder: (ctx) => AlertDialog(
+                  title: Text(isUrdu ? 'مقام تبدیل کریں' : 'Change Location'),
+                  content: TextField(
+                    onSubmitted: (val) {
+                      Navigator.pop(ctx);
+                      _setManualLocation(val);
+                    },
+                    decoration: InputDecoration(
+                      hintText: isUrdu ? 'شہر کا نام لکھیں' : 'Enter city (e.g. Karachi)',
+                    ),
+                  ),
+                ),
+              );
+            },
+            child: Text(isUrdu ? 'مقام غلط ہے؟ دستی تلاش کریں' : 'Wrong location? Search manually', style: const TextStyle(fontSize: 12)),
           ),
 
           const SizedBox(height: 32),
@@ -543,6 +668,28 @@ class _QiblaScreenState extends State<QiblaScreen>
 
           // ── Mosque list ────────────────────────────────────────────────
           if (_mosques.isNotEmpty) ...[
+            // ── View on Map button ──────────────────────────────────────
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: () {
+                  Navigator.push(context, MaterialPageRoute(builder: (_) =>
+                    MosqueMapScreen(userLat: _currentPosition!.latitude, userLon: _currentPosition!.longitude)));
+                },
+                icon: const Icon(Icons.map_rounded, size: 18),
+                label: Text(
+                  isUrdu ? 'نقشے پر دیکھیں' : 'View on Map with Routes',
+                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                ),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: primaryColor,
+                  side: BorderSide(color: primaryColor.withOpacity(0.4)),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
             // Closest mosque highlight card
             _buildClosestMosqueCard(_mosques.first, primaryColor, isDark, isUrdu),
             const SizedBox(height: 10),
