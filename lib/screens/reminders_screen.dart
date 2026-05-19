@@ -44,13 +44,24 @@ class _RemindersScreenState extends State<RemindersScreen>
     super.dispose();
   }
 
+  // Pre-parsed DateTime cache — avoids expensive DateTime.parse() in build loop
+  final Map<int, DateTime> _parsedTimes = {};
+
   Future<void> _loadReminders() async {
     final prefs = await SharedPreferences.getInstance();
     final String? data = prefs.getString('manual_reminders');
     if (data != null) {
       final List<dynamic> decoded = json.decode(data);
+      final reminders = decoded.map((e) => Map<String, dynamic>.from(e)).toList();
+      // Pre-parse all DateTime strings once at load time
+      _parsedTimes.clear();
+      for (final r in reminders) {
+        try {
+          _parsedTimes[r['id'] as int] = DateTime.parse(r['scheduledTime'] as String);
+        } catch (_) {}
+      }
       setState(() {
-        _reminders = decoded.map((e) => Map<String, dynamic>.from(e)).toList();
+        _reminders = reminders;
       });
     }
   }
@@ -102,12 +113,22 @@ class _RemindersScreenState extends State<RemindersScreen>
     }
 
     final int id = DateTime.now().millisecondsSinceEpoch % 1000000;
-    await NotificationService.scheduleManualReminder(
-      id: id,
-      title: finalTitle,
-      body: isUrdu ? 'نماز کا وقت ہوگیا ہے' : 'Time for prayer',
-      scheduledTime: scheduled,
-    );
+    try {
+      await NotificationService.scheduleManualReminder(
+        id: id,
+        title: finalTitle,
+        body: 'Time for prayer',
+        scheduledTime: scheduled,
+      );
+    } catch (_) {
+      if (!mounted) return;
+      _showSnack(
+        'Notification permission is required',
+        Icons.notifications_off_rounded,
+        Colors.red.shade600,
+      );
+      return;
+    }
 
     setState(() {
       _reminders.add({
@@ -117,6 +138,8 @@ class _RemindersScreenState extends State<RemindersScreen>
         'minute': picked.minute,
         'scheduledTime': scheduled.toIso8601String(),
       });
+      // Cache the parsed DateTime
+      _parsedTimes[id] = scheduled;
     });
     await _saveReminders();
     if (mounted) _showSnack(
@@ -189,6 +212,9 @@ class _RemindersScreenState extends State<RemindersScreen>
   }
 
   bool _isUpcoming(Map<String, dynamic> r) {
+    // Use pre-parsed DateTime from cache instead of parsing string every frame
+    final parsed = _parsedTimes[r['id'] as int];
+    if (parsed != null) return parsed.isAfter(DateTime.now());
     try {
       return DateTime.parse(r['scheduledTime'] as String).isAfter(DateTime.now());
     } catch (_) { return true; }

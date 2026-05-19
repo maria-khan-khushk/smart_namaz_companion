@@ -3,6 +3,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:android_alarm_manager_plus/android_alarm_manager_plus.dart';
 import 'package:timezone/timezone.dart' as tz;
 import 'package:timezone/data/latest.dart' as tz;
+import 'package:flutter_timezone/flutter_timezone.dart';
 import '../services/hadith_service.dart';
 import '../providers/language_provider.dart';
 import 'package:provider/provider.dart';
@@ -44,7 +45,7 @@ Future<void> azanAlarmCallback() async {
 
   await notifications.show(
     DateTime.now().millisecondsSinceEpoch ~/ 1000,
-    'Prayer Time 🕌',
+    'Prayer Time',
     'It is time for prayer.',
     const NotificationDetails(android: androidDetails),
   );
@@ -85,7 +86,17 @@ class NotificationService {
   // ── Initialize ─────────────────────────────────────────────────────────────
 
   static Future<void> initialize() async {
-    if (!tz.timeZoneDatabase.isInitialized) tz.initializeTimeZones();
+    if (!tz.timeZoneDatabase.isInitialized) {
+      tz.initializeTimeZones();
+    }
+    try {
+      final String timeZoneName = await FlutterTimezone.getLocalTimezone();
+      tz.setLocalLocation(tz.getLocation(timeZoneName));
+      print('Local timezone set to: $timeZoneName');
+    } catch (e) {
+      print('Error mapping local timezone: $e. Fallback to UTC.');
+      tz.setLocalLocation(tz.getLocation('UTC'));
+    }
 
     const AndroidInitializationSettings androidSettings =
         AndroidInitializationSettings('@mipmap/ic_launcher');
@@ -166,6 +177,19 @@ class NotificationService {
     print('Notification channels created (azan sound channel ready)');
   }
 
+  static Future<bool> requestAlarmPermissions() async {
+    final plugin = _notifications
+        .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>();
+    if (plugin == null) return true;
+
+    final notificationsAllowed =
+        await plugin.requestNotificationsPermission() ?? true;
+    final exactAllowed =
+        await plugin.requestExactAlarmsPermission() ?? true;
+    return notificationsAllowed && exactAllowed;
+  }
+
   // ── Manual reminder — azan.mp3 plays automatically when notification fires ──
   //
   // Uses reminder_azan_channel which has azan.mp3 at channel level.
@@ -179,6 +203,10 @@ class NotificationService {
     String? soundPath,
   }) async {
     if (!tz.timeZoneDatabase.isInitialized) tz.initializeTimeZones();
+    final allowed = await requestAlarmPermissions();
+    if (!allowed) {
+      throw Exception('Notification and exact alarm permissions are required.');
+    }
 
     final AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
       _reminderChannelId,               // ← custom azan sound channel
@@ -208,7 +236,7 @@ class NotificationService {
       body,
       tzTime,
       NotificationDetails(android: androidDetails, iOS: iosDetails),
-      androidAllowWhileIdle: true,
+      androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
       uiLocalNotificationDateInterpretation:
           UILocalNotificationDateInterpretation.absoluteTime,
       payload: 'manual_reminder',
@@ -280,6 +308,10 @@ class NotificationService {
     String? soundPath,
   }) async {
     if (!tz.timeZoneDatabase.isInitialized) tz.initializeTimeZones();
+    final allowed = await requestAlarmPermissions();
+    if (!allowed) {
+      throw Exception('Notification and exact alarm permissions are required.');
+    }
 
     final AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
       _defaultChannelId,
@@ -307,7 +339,7 @@ class NotificationService {
       body,
       tzTime,
       NotificationDetails(android: androidDetails, iOS: iosDetails),
-      androidAllowWhileIdle: true,
+      androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
       uiLocalNotificationDateInterpretation:
           UILocalNotificationDateInterpretation.absoluteTime,
       payload: 'azan_reminder',

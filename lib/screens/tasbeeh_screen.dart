@@ -9,6 +9,7 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:sensors_plus/sensors_plus.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'dart:async';
+import 'dart:ui';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../providers/language_provider.dart';
 import 'guidance_screen.dart';
@@ -146,7 +147,7 @@ class _TasbeehScreenState extends State<TasbeehScreen>
   late Animation<double>   _pulseAnim;
   late Animation<double>   _progressAnim;
   double _animatedProgress = 0;
-  
+
   // Enhancement state
   bool _isProximityEnabled = false;
   bool _isTtsEnabled = false;
@@ -162,6 +163,9 @@ class _TasbeehScreenState extends State<TasbeehScreen>
   bool _isTtsSpeakDhikr = false;
   StreamSubscription? _shakeSub;
   DateTime? _lastShake;
+
+  // Debounced save timer — avoids hammering disk on every tap
+  Timer? _saveDebounce;
 
   // 99 Names search
   String _namesSearch = '';
@@ -182,7 +186,13 @@ class _TasbeehScreenState extends State<TasbeehScreen>
         vsync: this, duration: const Duration(milliseconds: 400));
     _progressAnim = Tween<double>(begin: 0, end: 0).animate(
         CurvedAnimation(parent: _progressController, curve: Curves.easeOut))
-      ..addListener(() => setState(() => _animatedProgress = _progressAnim.value));
+      ..addListener(() {
+        // Update progress value WITHOUT triggering full-tree rebuild.
+        // The CustomPaint's shouldRepaint() handles redrawing efficiently.
+        _animatedProgress = _progressAnim.value;
+        // Only rebuild the counter area, not the entire screen
+        if (mounted) setState(() {});
+      });
 
     _focusNode = FocusNode();
     WidgetsBinding.instance.addObserver(this);
@@ -192,6 +202,10 @@ class _TasbeehScreenState extends State<TasbeehScreen>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.detached) {
+      // Save state immediately when app goes to background
+      _saveStateNow();
+    }
     if (state == AppLifecycleState.resumed) {
       // Refresh UI when coming back to foreground
       setState(() {});
@@ -211,12 +225,21 @@ class _TasbeehScreenState extends State<TasbeehScreen>
     _animateProgress(_counter / _target);
   }
 
-  Future<void> _saveState() async {
+  /// Debounced save — schedules a disk write after 3 seconds of inactivity.
+  /// Prevents hammering SharedPreferences with 4 writes on every single tap.
+  void _saveStateDebounced() {
+    _saveDebounce?.cancel();
+    _saveDebounce = Timer(const Duration(seconds: 3), _saveStateNow);
+  }
+
+  /// Immediate save — used on dispose and app pause to prevent data loss.
+  Future<void> _saveStateNow() async {
+    _saveDebounce?.cancel();
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setInt('tasbeeh_counter', _counter);
-    await prefs.setBool('tasbeeh_tts', _isTtsEnabled);
-    await prefs.setBool('tasbeeh_vibration', _isVibrationEnabled);
-    await prefs.setBool('tasbeeh_tts_dhikr', _isTtsSpeakDhikr);
+    prefs.setInt('tasbeeh_counter', _counter);
+    prefs.setBool('tasbeeh_tts', _isTtsEnabled);
+    prefs.setBool('tasbeeh_vibration', _isVibrationEnabled);
+    prefs.setBool('tasbeeh_tts_dhikr', _isTtsSpeakDhikr);
   }
 
   void _toggleBackgroundMode(bool enabled) async {
@@ -253,7 +276,7 @@ class _TasbeehScreenState extends State<TasbeehScreen>
       await _tts.setPitch(1.0);
       await _tts.setSpeechRate(0.5);
       await _tts.setVolume(1.0);
-      
+
       _tts.setCompletionHandler(() {});
       _tts.setErrorHandler((msg) {
         debugPrint("TTS Error: $msg");
@@ -263,7 +286,7 @@ class _TasbeehScreenState extends State<TasbeehScreen>
       if (Theme.of(context).platform == TargetPlatform.android) {
         await _tts.setEngine("com.google.android.tts");
       }
-      
+
       setState(() => _isTtsReady = true);
     } catch (e) {
       debugPrint("TTS Initialization error: $e");
@@ -305,6 +328,8 @@ class _TasbeehScreenState extends State<TasbeehScreen>
 
   @override
   void dispose() {
+    // Save state immediately before screen is destroyed
+    _saveStateNow();
     WidgetsBinding.instance.removeObserver(this);
     _tabController.dispose();
     _pulseController.dispose();
@@ -312,6 +337,7 @@ class _TasbeehScreenState extends State<TasbeehScreen>
     _searchController.dispose();
     _proximitySub?.cancel();
     _shakeSub?.cancel();
+    _saveDebounce?.cancel();
     _tts.stop();
     _silentPlayer.dispose();
     WakelockPlus.disable();
@@ -323,9 +349,9 @@ class _TasbeehScreenState extends State<TasbeehScreen>
 
   void _increment() {
     if (_counter >= _target) return;
-    
+
     _counter++;
-    _saveState();
+    _saveStateDebounced();
 
     // Only update UI if app is in foreground
     if (WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed ||
@@ -345,24 +371,24 @@ class _TasbeehScreenState extends State<TasbeehScreen>
       }
       _animatedProgress = _counter / _target;
     }
-    
+
     // TTS for increment
     if (_counter == _target) {
       final isUrdu = Provider.of<LanguageProvider>(context, listen: false).isUrdu;
       _speak(
-        isUrdu ? 'تسبيح مکمل ہوگئی' : 'Tasbeeh Completed', 
+        isUrdu ? 'تسبيح مکمل ہوگئی' : 'Tasbeeh Completed',
         lang: isUrdu ? "ur-PK" : "en-US"
       );
     } else {
       if (_isTtsSpeakDhikr) {
         String dhikrText = "";
         String dhikrLang = "ar-SA"; // Default to Arabic for Dhikr
-        
+
         if (_tabController.index == 0 && _selectedPreset >= 0) {
           dhikrText = _dhikrPresets[_selectedPreset]['arabic'];
         } else {
           // Default or 99 Names
-          dhikrText = "يا الله"; 
+          dhikrText = "يا الله";
         }
         _speak(dhikrText, lang: dhikrLang);
       } else {
@@ -501,7 +527,7 @@ class _TasbeehScreenState extends State<TasbeehScreen>
         autofocus: true,
         onKey: (event) {
           if (event is RawKeyDownEvent) {
-            if (event.logicalKey == LogicalKeyboardKey.audioVolumeUp || 
+            if (event.logicalKey == LogicalKeyboardKey.audioVolumeUp ||
                 event.logicalKey == LogicalKeyboardKey.audioVolumeDown) {
               _increment();
             }
@@ -533,7 +559,8 @@ class _TasbeehScreenState extends State<TasbeehScreen>
       elevation: 0,
       actions: [
         IconButton(
-          icon: const Text('🤲', style: TextStyle(fontSize: 20)),
+          icon: const Icon(Icons.volunteer_activism_rounded),
+          tooltip: isUrdu ? 'دعائیں' : 'Duas',
           onPressed: () => Navigator.push(context,
               MaterialPageRoute(builder: (_) => GuidanceScreen())),
         ),
@@ -557,8 +584,8 @@ class _TasbeehScreenState extends State<TasbeehScreen>
 
   Widget _buildSettingsBar(bool isUrdu, Color primary, bool isDark) {
     return Container(
-      margin: const EdgeInsets.all(12),
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
+      margin: const EdgeInsets.fromLTRB(12, 10, 12, 6),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
       decoration: BoxDecoration(
         color: isDark ? Colors.white.withOpacity(0.05) : Colors.white,
         borderRadius: BorderRadius.circular(20),
@@ -571,8 +598,10 @@ class _TasbeehScreenState extends State<TasbeehScreen>
         ],
         border: Border.all(color: primary.withOpacity(0.1)),
       ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceAround,
+      child: Wrap(
+        alignment: WrapAlignment.spaceBetween,
+        runSpacing: 10,
+        spacing: 8,
         children: [
           _settingsToggle(
             icon: Icons.waves_rounded,
@@ -592,13 +621,13 @@ class _TasbeehScreenState extends State<TasbeehScreen>
           ),
           _settingsToggle(
             icon: _isTtsSpeakDhikr ? Icons.text_fields_rounded : Icons.numbers_rounded,
-            active: _isTtsEnabled, 
+            active: _isTtsEnabled,
             onTap: () {
               setState(() => _isTtsSpeakDhikr = !_isTtsSpeakDhikr);
-              _saveState();
+              _saveStateNow();
             },
-            label: isUrdu 
-              ? (_isTtsSpeakDhikr ? 'ذکر' : 'نمبر') 
+            label: isUrdu
+              ? (_isTtsSpeakDhikr ? 'ذکر' : 'نمبر')
               : (_isTtsSpeakDhikr ? 'Dhikr' : 'Number'),
             tooltip: isUrdu ? 'ذکر یا نمبر کے درمیان تبدیلی' : 'Switch between speaking Dhikr or Numbers',
             color: primary,
@@ -632,50 +661,63 @@ class _TasbeehScreenState extends State<TasbeehScreen>
     );
   }
 
-  Widget _settingsToggle({required IconData icon, required bool active, required VoidCallback onTap, required String label, required Color color, String? tooltip}) {
+  Widget _settingsToggle({
+    required IconData icon,
+    required bool active,
+    required VoidCallback onTap,
+    required String label,
+    required Color color,
+    String? tooltip,
+  }) {
     return Tooltip(
       message: tooltip ?? label,
       preferBelow: false,
-      child: GestureDetector(
-      onTap: onTap,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          AnimatedContainer(
-            duration: const Duration(milliseconds: 300),
-            curve: Curves.easeOutBack,
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: active ? color : color.withOpacity(0.05),
-              borderRadius: BorderRadius.circular(14),
-              boxShadow: [
-                BoxShadow(
-                  color: active ? color.withOpacity(0.3) : Colors.transparent,
-                  blurRadius: active ? 8 : 0.0001, // Avoid zero blur radius assertion if any
-                  offset: active ? const Offset(0, 3) : Offset.zero,
-                )
-              ],
-            ),
-            child: Icon(
-              icon, 
-              color: active ? Colors.white : color.withOpacity(0.6), 
-              size: 22
-            ),
+      child: SizedBox(
+        width: 54,
+        child: GestureDetector(
+          onTap: onTap,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 300),
+                curve: Curves.easeOutBack,
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: active ? color : color.withOpacity(0.05),
+                  borderRadius: BorderRadius.circular(14),
+                  boxShadow: [
+                    BoxShadow(
+                      color: active ? color.withOpacity(0.3) : Colors.transparent,
+                      blurRadius: active ? 8 : 0.0001,
+                      offset: active ? const Offset(0, 3) : Offset.zero,
+                    )
+                  ],
+                ),
+                child: Icon(
+                  icon,
+                  color: active ? Colors.white : color.withOpacity(0.6),
+                  size: 22,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                label,
+                textAlign: TextAlign.center,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: active ? FontWeight.bold : FontWeight.w500,
+                  color: active ? color : Colors.grey,
+                ),
+              ),
+            ],
           ),
-          const SizedBox(height: 6),
-          Text(
-            label, 
-            style: TextStyle(
-              fontSize: 10, 
-              fontWeight: active ? FontWeight.bold : FontWeight.w500, 
-              color: active ? color : Colors.grey
-            )
-          ),
-        ],
+        ),
       ),
-    ),
-  );
-}
+    );
+  }
 
   // ── Tab 1: Counter ─────────────────────────────────────────────────────────
 
@@ -689,7 +731,7 @@ class _TasbeehScreenState extends State<TasbeehScreen>
 
     return SingleChildScrollView(
       physics: const BouncingScrollPhysics(),
-      padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
+      padding: const EdgeInsets.fromLTRB(18, 12, 18, 24),
       child: Column(children: [
 
         // ── Selected dhikr banner ─────────────────────────────────────
@@ -735,7 +777,7 @@ class _TasbeehScreenState extends State<TasbeehScreen>
           ),
         ),
 
-        const SizedBox(height: 32),
+        const SizedBox(height: 18),
 
         // ── Ring counter — tap to count ───────────────────────────────
         GestureDetector(
@@ -743,7 +785,7 @@ class _TasbeehScreenState extends State<TasbeehScreen>
           child: ScaleTransition(
             scale: _pulseAnim,
             child: SizedBox(
-              width: 220, height: 220,
+              width: 188, height: 188,
               child: CustomPaint(
                 painter: _RingPainter(
                   progress: _animatedProgress,
@@ -754,7 +796,7 @@ class _TasbeehScreenState extends State<TasbeehScreen>
                   Text(
                     '$_counter',
                     style: TextStyle(
-                      fontSize: 68,
+                      fontSize: 58,
                       fontWeight: FontWeight.bold,
                       color: isDone ? Colors.green : primary,
                       height: 1,
@@ -792,7 +834,7 @@ class _TasbeehScreenState extends State<TasbeehScreen>
           style: TextStyle(fontSize: 12, color: textSec),
         ),
 
-        const SizedBox(height: 28),
+        const SizedBox(height: 16),
 
         // ── Progress + stat row ────────────────────────────────────────
         Row(children: [
@@ -816,7 +858,7 @@ class _TasbeehScreenState extends State<TasbeehScreen>
           ),
         ]),
 
-        const SizedBox(height: 24),
+        const SizedBox(height: 16),
 
         // ── Action buttons ─────────────────────────────────────────────
         Row(children: [
@@ -857,7 +899,7 @@ class _TasbeehScreenState extends State<TasbeehScreen>
   Widget _statTile(String label, String value, Color color, bool isDark,
       {required bool isDone}) {
     return Expanded(child: Container(
-      padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 10),
+      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
       decoration: BoxDecoration(
         color: isDone
             ? Colors.green.withOpacity(isDark ? 0.15 : 0.08)
@@ -866,7 +908,7 @@ class _TasbeehScreenState extends State<TasbeehScreen>
       ),
       child: Column(children: [
         Text(value,
-            style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: color)),
+            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: color)),
         const SizedBox(height: 2),
         Text(label,
             style: TextStyle(fontSize: 10, color: color.withOpacity(0.7)),

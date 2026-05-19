@@ -18,11 +18,11 @@ import '../services/hijri_service.dart';
 
 // Prayer icon + color mapping
 const _prayerMeta = {
-  'Fajr':    {'icon': Icons.wb_twilight,     'emoji': '🌙'},
-  'Dhuhr':   {'icon': Icons.wb_sunny,        'emoji': '☀️'},
-  'Asr':     {'icon': Icons.brightness_5,    'emoji': '🌤️'},
-  'Maghrib': {'icon': Icons.nights_stay,     'emoji': '🌆'},
-  'Isha':    {'icon': Icons.nightlight_round,'emoji': '🌃'},
+  'Fajr':    {'icon': Icons.wb_twilight},
+  'Dhuhr':   {'icon': Icons.wb_sunny},
+  'Asr':     {'icon': Icons.brightness_5},
+  'Maghrib': {'icon': Icons.nights_stay},
+  'Isha':    {'icon': Icons.nightlight_round},
 };
 
 class HomeScreen extends StatefulWidget {
@@ -255,11 +255,11 @@ class _HomeScreenState extends State<HomeScreen> {
                   children: [
                     Image.asset(
                       'assets/logo.png',
-                      height: 18,
-                      width: 18,
+                      height: 30,
+                      width: 30,
                       fit: BoxFit.contain,
                     ),
-                    const SizedBox(width: 8),
+                    const SizedBox(width: 10),
                     Text(
                       isUrdu ? 'اوقاتِ نماز' : 'Awwab',
                       style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: primaryColor),
@@ -287,7 +287,7 @@ class _HomeScreenState extends State<HomeScreen> {
               child: const Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.local_fire_department, color: Colors.white, size: 18),
+                  Icon(Icons.insights_rounded, color: Colors.white, size: 18),
                   SizedBox(width: 4),
                   Text('Streak', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
                 ],
@@ -331,11 +331,11 @@ class _HomeScreenState extends State<HomeScreen> {
       children: [
         // ── Hero countdown card ──────────────────────────────────────
         _buildCountdownCard(isUrdu, primaryColor, isDark),
-        const SizedBox(height: 20),
+        const SizedBox(height: 12),
 
         // ── Section label ────────────────────────────────────────────
         Padding(
-          padding: const EdgeInsets.only(left: 4, bottom: 10),
+          padding: const EdgeInsets.only(left: 4, bottom: 8),
           child: Text(
             isUrdu ? 'آج کے اوقات' : "Today's Prayers",
             style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600,
@@ -360,7 +360,7 @@ class _HomeScreenState extends State<HomeScreen> {
         ? [primaryColor.withOpacity(0.85), primaryColor.withOpacity(0.55)]
         : [AppColors.primaryMuted, AppColors.secondaryMuted];
 
-    final emoji = _prayerMeta[nextPrayer.replaceAll(' (Tomorrow)', '')]?['emoji'] as String? ?? '🕌';
+    final icon = _prayerMeta[nextPrayer.replaceAll(' (Tomorrow)', '')]?['icon'] as IconData? ?? Icons.mosque_rounded;
     final countdown = _formatCountdown(_timeLeft);
     final prayerDisplay = _getNextPrayerDisplay(isUrdu);
 
@@ -376,11 +376,20 @@ class _HomeScreenState extends State<HomeScreen> {
           BoxShadow(color: primaryColor.withOpacity(0.35), blurRadius: 20, offset: const Offset(0, 8)),
         ],
       ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: CustomPaint(
+              painter: _HomeMasjidBackdropPainter(
+                color: Colors.white.withOpacity(isDark ? 0.10 : 0.14),
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 22),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
             // Label row
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -402,14 +411,14 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ],
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 8),
 
-            // Prayer name + emoji
+            // Prayer name and icon
             Row(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                Text(emoji, style: const TextStyle(fontSize: 32)),
-                const SizedBox(width: 12),
+                Icon(icon, color: Colors.white.withOpacity(0.9), size: 36),
+                const SizedBox(width: 14),
                 Text(
                   prayerDisplay,
                   style: const TextStyle(
@@ -421,11 +430,11 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ],
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 10),
 
             // Divider
             Container(height: 1, color: Colors.white.withOpacity(0.2)),
-            const SizedBox(height: 14),
+            const SizedBox(height: 10),
 
             // Countdown row
             Row(
@@ -444,7 +453,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       countdown,
                       style: const TextStyle(
                         color: Colors.white,
-                        fontSize: 28,
+                        fontSize: 24,
                         fontWeight: FontWeight.w700,
                         fontFeatures: [FontFeature.tabularFigures()],
                         letterSpacing: 1,
@@ -472,8 +481,10 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
               ],
             ),
-          ],
-        ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -497,58 +508,61 @@ class _HomeScreenState extends State<HomeScreen> {
       margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
         color: isNext
-            ? primaryColor.withOpacity(isDark ? 0.18 : 0.08)
+            ? primaryColor.withOpacity(isDark ? 0.22 : 0.11)
             : cardColor,
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(20),
         border: isNext
-            ? Border.all(color: primaryColor.withOpacity(0.4), width: 1.5)
+            ? Border.all(color: primaryColor.withOpacity(0.38), width: 1.5)
             : Border.all(color: Colors.transparent),
         boxShadow: isNext
-            ? [BoxShadow(color: primaryColor.withOpacity(0.12), blurRadius: 12, offset: const Offset(0, 4))]
-            : [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 6, offset: const Offset(0, 2))],
+            ? [BoxShadow(color: primaryColor.withOpacity(0.14), blurRadius: 14, offset: const Offset(0, 5))]
+            : [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 8, offset: const Offset(0, 3))],
       ),
       child: Material(
         color: Colors.transparent,
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(20),
         child: InkWell(
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: BorderRadius.circular(20),
           onTap: () => Navigator.push(context, MaterialPageRoute(
               builder: (_) => PrayerGuidanceScreen(prayerName: name))),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          child: Container(
+            constraints: const BoxConstraints(minHeight: 78),
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
             child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 // Icon
                 Container(
                   width: 44,
                   height: 44,
                   decoration: BoxDecoration(
-                    color: isNext ? primaryColor : primaryColor.withOpacity(isDark ? 0.25 : 0.1),
+                    color: isNext ? primaryColor : primaryColor.withOpacity(isDark ? 0.22 : 0.14),
                     borderRadius: BorderRadius.circular(14),
                   ),
                   child: Icon(icon, color: isNext ? Colors.white : primaryColor, size: 22),
                 ),
-                const SizedBox(width: 14),
+                const SizedBox(width: 16),
 
                 // Prayer name
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       Text(
                         _getPrayerName(name, isUrdu),
                         style: TextStyle(
-                          fontSize: 17,
-                          fontWeight: isNext ? FontWeight.bold : FontWeight.w500,
+                          fontSize: 16,
+                          fontWeight: isNext ? FontWeight.bold : FontWeight.w600,
                           color: hasPassed && !isNext
-                              ? textPrimary.withOpacity(0.4)
+                              ? textPrimary.withOpacity(0.5)
                               : textPrimary,
                         ),
                       ),
                       if (isNext)
                         Text(
                           isUrdu ? 'اگلی نماز' : 'Up next',
-                          style: TextStyle(fontSize: 11, color: primaryColor, fontWeight: FontWeight.w500),
+                          style: TextStyle(fontSize: 11, color: primaryColor, fontWeight: FontWeight.w600),
                         ),
                     ],
                   ),
@@ -557,21 +571,22 @@ class _HomeScreenState extends State<HomeScreen> {
                 // Time + passed indicator
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.end,
+                  mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     Text(
                       timeFormatted,
                       style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
                         color: hasPassed && !isNext
-                            ? textPrimary.withOpacity(0.4)
+                            ? textPrimary.withOpacity(0.45)
                             : isNext ? primaryColor : textPrimary,
                       ),
                     ),
                     if (hasPassed && !isNext)
                       Text(
                         isUrdu ? 'ادا' : 'Passed',
-                        style: TextStyle(fontSize: 10, color: Colors.green.shade400, fontWeight: FontWeight.w500),
+                        style: TextStyle(fontSize: 10, color: Colors.green.shade400, fontWeight: FontWeight.w600),
                       ),
                   ],
                 ),
@@ -579,7 +594,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 // Arrow
                 const SizedBox(width: 8),
                 Icon(Icons.chevron_right_rounded,
-                    color: isNext ? primaryColor : textPrimary.withOpacity(0.3), size: 20),
+                    color: isNext ? primaryColor : textPrimary.withOpacity(0.35), size: 22),
               ],
             ),
           ),
@@ -618,8 +633,8 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                   child: Image.asset(
                     'assets/logo.png',
-                    height: 26,
-                    width: 26,
+                    height: 44,
+                    width: 44,
                     fit: BoxFit.contain,
                   ),
                 ),
@@ -715,4 +730,51 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
   }
-} // End of HomeScreen
+}
+
+class _HomeMasjidBackdropPainter extends CustomPainter {
+  final Color color;
+
+  const _HomeMasjidBackdropPainter({required this.color});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final w = size.width;
+    final h = size.height;
+    final basePaint = Paint()
+      ..shader = LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        colors: [color.withOpacity(0.0), color.withOpacity(0.18)],
+      ).createShader(Rect.fromLTWH(0, 0, w, h))
+      ..isAntiAlias = true;
+
+    final wavePath = Path()
+      ..moveTo(0, h * 0.72)
+      ..quadraticBezierTo(w * 0.22, h * 0.62, w * 0.38, h * 0.68)
+      ..quadraticBezierTo(w * 0.56, h * 0.74, w * 0.70, h * 0.65)
+      ..quadraticBezierTo(w * 0.80, h * 0.58, w, h * 0.62)
+      ..lineTo(w, h)
+      ..lineTo(0, h)
+      ..close();
+
+    canvas.drawPath(wavePath, basePaint);
+
+    final linePaint = Paint()
+      ..color = color.withOpacity(0.12)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.2
+      ..isAntiAlias = true;
+
+    final accentPath = Path()
+      ..moveTo(0, h * 0.78)
+      ..quadraticBezierTo(w * 0.24, h * 0.66, w * 0.46, h * 0.72)
+      ..quadraticBezierTo(w * 0.64, h * 0.78, w * 0.84, h * 0.68)
+      ..quadraticBezierTo(w * 0.92, h * 0.64, w, h * 0.68);
+    canvas.drawPath(accentPath, linePaint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _HomeMasjidBackdropPainter oldDelegate) =>
+      oldDelegate.color != color;
+}

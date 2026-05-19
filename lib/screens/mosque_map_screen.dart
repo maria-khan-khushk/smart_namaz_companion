@@ -37,11 +37,13 @@ class MosqueMapItem {
 class MosqueMapScreen extends StatefulWidget {
   final double userLat;
   final double userLon;
+  final List<MosqueMapItem>? initialMosques;
 
   const MosqueMapScreen({
-    super.key, 
+    super.key,
     this.userLat = 24.8934, // Default to Karachi (Bahria University area)
     this.userLon = 67.0894,
+    this.initialMosques,
   });
 
   @override
@@ -58,22 +60,25 @@ class _MosqueMapScreenState extends State<MosqueMapScreen> with TickerProviderSt
   String _travelMode = 'foot'; // 'foot' or 'car'
   String _userAddress = '';
   bool _isFetchingAddress = false;
-  
+
   // Custom location state
   late double _currentLat;
   late double _currentLon;
   bool _isUsingCustomLocation = false;
-  
+
   // Search state
   final TextEditingController _searchController = TextEditingController();
   List<dynamic> _searchResults = [];
   bool _isSearching = false;
   Timer? _searchDebounce;
+  Timer? _addressDebounce;
 
-  // Route colors
+  // Harmonized Slate-and-Olive Route & Marker Palette
   static const _routeColors = [
-    Color(0xFF1B9C85), Color(0xFF6C63FF), Color(0xFFE84545),
-    Color(0xFFFF8C32), Color(0xFF3DB2FF), Color(0xFFFF6B9D),
+    Color(0xFF5A6B53), // Slate-olive dark
+    Color(0xFF7B8E72), // Slate-olive medium
+    Color(0xFF9CB093), // Slate-olive light
+    Color(0xFF4A5644), // Slate-olive deep dark
   ];
 
   @override
@@ -81,8 +86,22 @@ class _MosqueMapScreenState extends State<MosqueMapScreen> with TickerProviderSt
     super.initState();
     _currentLat = widget.userLat;
     _currentLon = widget.userLon;
-    _loadMosques();
+    if (widget.initialMosques != null && widget.initialMosques!.isNotEmpty) {
+      _mosques = widget.initialMosques!;
+      _isLoading = false;
+      _fetchAllRoutes();
+    } else {
+      _loadMosques();
+    }
     _fetchUserAddress();
+  }
+
+  @override
+  void dispose() {
+    _searchDebounce?.cancel();
+    _addressDebounce?.cancel();
+    _searchController.dispose();
+    super.dispose();
   }
 
   void _updateLocation(double lat, double lon, {bool isCustom = true}) {
@@ -94,7 +113,9 @@ class _MosqueMapScreenState extends State<MosqueMapScreen> with TickerProviderSt
       for (final m in _mosques) { m.routePoints = []; m.routeDistanceKm = null; m.routeDurationMin = null; }
     });
     _loadMosques();
-    _fetchUserAddress();
+    // Debounce address fetching to avoid spamming Nominatim
+    _addressDebounce?.cancel();
+    _addressDebounce = Timer(const Duration(milliseconds: 1500), _fetchUserAddress);
   }
 
   Future<void> _fetchUserAddress() async {
@@ -149,37 +170,48 @@ class _MosqueMapScreenState extends State<MosqueMapScreen> with TickerProviderSt
     final lat = double.parse(result['lat']);
     final lon = double.parse(result['lon']);
     final name = result['display_name'];
-    
+
     _searchController.clear();
     setState(() {
       _searchResults = [];
       _userAddress = name;
     });
-    
+
     _updateLocation(lat, lon, isCustom: true);
     _mapController.move(LatLng(lat, lon), 14.0);
     FocusScope.of(context).unfocus();
   }
 
   // ── Load mosques from Overpass/Nominatim ──────────────────────────────────
+  // ── Load mosques from Overpass/Nominatim with Dynamic Intelligent Radius ──
   Future<void> _loadMosques() async {
     setState(() { _isLoading = true; _error = ''; });
     try {
-      print('[MosqueMap] Searching for mosques near $_currentLat, $_currentLon');
+      print('[MosqueMap] Searching for mosques near $_currentLat, $_currentLon with dynamic radius');
       List<MosqueMapItem>? result;
-      
-      // Try exactly the same sequence as qibla_screen.dart
-      result = await _fetchNominatim(_currentLat, _currentLon);
-      
-      if (result == null || result.isEmpty) {
-        print('[MosqueMap] Nominatim found nothing, trying Overpass mirrors...');
-        result = await _fetchOverpass(_currentLat, _currentLon, 'https://overpass-api.de/api/interpreter');
-      }
-      if (result == null || result.isEmpty) {
-        result = await _fetchOverpass(widget.userLat, widget.userLon, 'https://overpass.kumi.systems/api/interpreter');
-      }
-      if (result == null || result.isEmpty) {
-        result = await _fetchOverpass(widget.userLat, widget.userLon, 'https://maps.mail.ru/osm/tools/overpass/api/interpreter');
+
+      // Gradually expanding radius: 3km, 10km, 25km, 50km
+      final List<double> deltas = [0.027, 0.09, 0.22, 0.45];
+      final List<int> overpassRadii = [3000, 10000, 25000, 50000];
+
+      for (int i = 0; i < deltas.length; i++) {
+        final delta = deltas[i];
+        final radius = overpassRadii[i];
+
+        print('[MosqueMap] Querying at radius: ${radius / 1000} km...');
+        result = await _fetchNominatim(_currentLat, _currentLon, delta);
+
+        if (result == null || result.isEmpty) {
+          result = await _fetchOverpass(_currentLat, _currentLon, 'https://overpass-api.de/api/interpreter', radius);
+        }
+        if (result == null || result.isEmpty) {
+          result = await _fetchOverpass(_currentLat, _currentLon, 'https://overpass.kumi.systems/api/interpreter', radius);
+        }
+
+        if (result != null && result.length >= 3) {
+          print('[MosqueMap] Found sufficient mosques (${result.length}) at radius: ${radius / 1000} km.');
+          break;
+        }
       }
 
       if (result == null || result.isEmpty) {
@@ -187,30 +219,33 @@ class _MosqueMapScreenState extends State<MosqueMapScreen> with TickerProviderSt
         setState(() { _isLoading = false; _error = 'No mosques found nearby within 50km.'; });
         return;
       }
-      
-      print('[MosqueMap] Found ${result.length} mosques.');
-      result.sort((a, b) => a.distanceKm.compareTo(b.distanceKm));
-      setState(() { _mosques = result!.take(10).toList(); _isLoading = false; });
 
-      // Fetch routes for all mosques
+      result.sort((a, b) => a.distanceKm.compareTo(b.distanceKm));
+
+      // Limit to closest 4 mosques for sparse, clean visual representation
+      final limit = result.length > 4 ? 4 : result.length;
+      setState(() {
+        _mosques = result!.take(limit).toList();
+        _isLoading = false;
+      });
+
       _fetchAllRoutes();
     } catch (e) {
       setState(() { _isLoading = false; _error = 'Failed to load mosques: $e'; });
     }
   }
 
-  Future<List<MosqueMapItem>?> _fetchOverpass(double lat, double lon, String endpoint) async {
+  Future<List<MosqueMapItem>?> _fetchOverpass(double lat, double lon, String endpoint, int radiusMeters) async {
     try {
-      const r = 50000; // 50 km — match qibla screen radius
       final query = '[out:json][timeout:25];'
           '('
-          'node["amenity"="place_of_worship"]["religion"="muslim"](around:$r,$lat,$lon);'
-          'way["amenity"="place_of_worship"]["religion"="muslim"](around:$r,$lat,$lon);'
-          'node["amenity"="mosque"](around:$r,$lat,$lon);'
-          'way["amenity"="mosque"](around:$r,$lat,$lon);'
-          'node["building"="mosque"](around:$r,$lat,$lon);'
-          'way["building"="mosque"](around:$r,$lat,$lon);'
-          ');out center 30;';
+          'node["amenity"="place_of_worship"]["religion"="muslim"](around:$radiusMeters,$lat,$lon);'
+          'way["amenity"="place_of_worship"]["religion"="muslim"](around:$radiusMeters,$lat,$lon);'
+          'node["amenity"="mosque"](around:$radiusMeters,$lat,$lon);'
+          'way["amenity"="mosque"](around:$radiusMeters,$lat,$lon);'
+          'node["building"="mosque"](around:$radiusMeters,$lat,$lon);'
+          'way["building"="mosque"](around:$radiusMeters,$lat,$lon);'
+          ');out center 20;';
       final resp = await http.post(
         Uri.parse(endpoint),
         headers: {'Content-Type': 'application/x-www-form-urlencoded'},
@@ -236,13 +271,12 @@ class _MosqueMapScreenState extends State<MosqueMapScreen> with TickerProviderSt
     } catch (_) { return null; }
   }
 
-  Future<List<MosqueMapItem>?> _fetchNominatim(double lat, double lon) async {
+  Future<List<MosqueMapItem>?> _fetchNominatim(double lat, double lon, double delta) async {
     try {
-      final delta = 0.45; // ~50 km bounding box
       final uri = Uri.parse('https://nominatim.openstreetmap.org/search'
           '?format=json&q=mosque&bounded=1'
           '&viewbox=${lon - delta},${lat + delta},${lon + delta},${lat - delta}'
-          '&limit=20&addressdetails=0');
+          '&limit=15&addressdetails=0');
       final resp = await http.get(uri, headers: {'User-Agent': 'SmartNamazCompanion/1.0'}).timeout(const Duration(seconds: 12));
       if (resp.statusCode != 200) return null;
       final raw = jsonDecode(resp.body) as List;
@@ -257,10 +291,12 @@ class _MosqueMapScreenState extends State<MosqueMapScreen> with TickerProviderSt
   }
 
   // ── OSRM Routing ─────────────────────────────────────────────────────────
+  /// Only load routes for the nearest 3 mosques initially.
+  /// Routes for other mosques are loaded lazily when selected.
   Future<void> _fetchAllRoutes() async {
-    // Fetch routes in parallel to reduce lag
+    final limit = _mosques.length < 3 ? _mosques.length : 3;
     final futures = <Future>[];
-    for (int i = 0; i < _mosques.length; i++) {
+    for (int i = 0; i < limit; i++) {
       futures.add(_fetchRoute(i));
     }
     await Future.wait(futures);
@@ -269,7 +305,10 @@ class _MosqueMapScreenState extends State<MosqueMapScreen> with TickerProviderSt
   Future<void> _fetchRoute(int index) async {
     if (index < 0 || index >= _mosques.length) return;
     final m = _mosques[index];
-    setState(() => m.isLoadingRoute = true);
+    // Skip if route already loaded
+    if (m.routePoints.isNotEmpty) return;
+    m.isLoadingRoute = true;
+    if (mounted) setState(() {});
     try {
       final profile = _travelMode == 'car' ? 'driving' : 'foot';
       final url = 'https://router.project-osrm.org/route/v1/$profile/'
@@ -284,20 +323,17 @@ class _MosqueMapScreenState extends State<MosqueMapScreen> with TickerProviderSt
           final points = coords.map<LatLng>((c) => LatLng((c[1] as num).toDouble(), (c[0] as num).toDouble())).toList();
           final distKm = (route['distance'] as num).toDouble() / 1000;
           final durMin = (route['duration'] as num).toDouble() / 60;
-          if (mounted) {
-            setState(() {
-              m.routePoints = points;
-              m.routeDistanceKm = distKm;
-              m.routeDurationMin = durMin;
-              m.isLoadingRoute = false;
-            });
-          }
-          return;
+          m.routePoints = points;
+          m.routeDistanceKm = distKm;
+          m.routeDurationMin = durMin;
         }
       }
     } catch (_) {}
-    if (mounted) setState(() => m.isLoadingRoute = false);
+    m.isLoadingRoute = false;
+    // Single setState after route finishes (instead of 3 separate calls)
+    if (mounted) setState(() {});
   }
+
 
   double _haversineKm(double lat1, double lon1, double lat2, double lon2) {
     const r = 6371.0;
@@ -312,6 +348,10 @@ class _MosqueMapScreenState extends State<MosqueMapScreen> with TickerProviderSt
     if (_selectedIndex >= 0) {
       final m = _mosques[_selectedIndex];
       _mapController.move(LatLng((_currentLat + m.lat) / 2, (_currentLon + m.lon) / 2), 14.5);
+      // Lazy-load route for this mosque if not already loaded
+      if (m.routePoints.isEmpty && !m.isLoadingRoute) {
+        _fetchRoute(_selectedIndex);
+      }
     } else {
       _mapController.move(LatLng(_currentLat, _currentLon), 11.0);
     }
@@ -408,7 +448,7 @@ class _MosqueMapScreenState extends State<MosqueMapScreen> with TickerProviderSt
           hintText: isUrdu ? 'جگہ تلاش کریں...' : 'Search location...',
           hintStyle: TextStyle(fontSize: 13, color: isDark ? Colors.white38 : Colors.black38),
           prefixIcon: Icon(Icons.search_rounded, color: primaryColor, size: 20),
-          suffixIcon: _isSearching 
+          suffixIcon: _isSearching
             ? Container(width: 20, height: 20, padding: const EdgeInsets.all(12), child: CircularProgressIndicator(strokeWidth: 2, color: primaryColor))
             : (_searchController.text.isNotEmpty ? IconButton(icon: const Icon(Icons.close_rounded, size: 18), onPressed: () { _searchController.clear(); setState(() => _searchResults = []); }) : null),
           border: InputBorder.none,
@@ -481,7 +521,7 @@ class _MosqueMapScreenState extends State<MosqueMapScreen> with TickerProviderSt
     return FlutterMap(
       mapController: _mapController,
       options: MapOptions(
-        initialCenter: LatLng(_currentLat, _currentLon), 
+        initialCenter: LatLng(_currentLat, _currentLon),
         initialZoom: 11.0,
         onLongPress: (hit, point) => _updateLocation(point.latitude, point.longitude, isCustom: true),
       ),
@@ -553,7 +593,7 @@ class _MosqueMapScreenState extends State<MosqueMapScreen> with TickerProviderSt
               border: Border.all(color: Colors.white, width: 2.5),
               boxShadow: [BoxShadow(color: color.withOpacity(0.4), blurRadius: 8, spreadRadius: 2)],
             ),
-            child: const Center(child: Text('🕌', style: TextStyle(fontSize: 16))),
+            child: const Center(child: Icon(Icons.mosque_rounded, size: 16, color: Colors.white)),
           ),
         ),
       ));
@@ -563,7 +603,9 @@ class _MosqueMapScreenState extends State<MosqueMapScreen> with TickerProviderSt
 
   // ── Bottom Sheet ──────────────────────────────────────────────────────────
   Widget _buildBottomSheet(Color primaryColor, bool isDark, bool isUrdu) {
-    final bgColor = isDark ? const Color(0xFF1E1E2E) : Colors.white;
+    final bgColor = Theme.of(context).cardColor;
+    final textPrimary = Theme.of(context).textTheme.bodyLarge?.color ??
+        (isDark ? Colors.white : Colors.black87);
     return Container(
       constraints: const BoxConstraints(maxHeight: 280),
       decoration: BoxDecoration(
@@ -581,7 +623,7 @@ class _MosqueMapScreenState extends State<MosqueMapScreen> with TickerProviderSt
             Icon(Icons.mosque_rounded, color: primaryColor, size: 18),
             const SizedBox(width: 8),
             Text(isUrdu ? 'قریبی مساجد' : 'Nearby Mosques',
-                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: isDark ? Colors.white : Colors.black87)),
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: textPrimary)),
             const Spacer(),
             if (_selectedIndex >= 0) TextButton(onPressed: () => _selectMosque(_selectedIndex),
                 child: Text(isUrdu ? 'سب دکھائیں' : 'Show All', style: TextStyle(fontSize: 12, color: primaryColor))),
@@ -603,9 +645,9 @@ class _MosqueMapScreenState extends State<MosqueMapScreen> with TickerProviderSt
                 children: [
                   Icon(Icons.my_location_rounded, size: 14, color: primaryColor),
                   const SizedBox(width: 6),
-                  Text(isUrdu 
-                    ? (_isUsingCustomLocation ? 'منتخب مقام' : 'آپ کا مقام') 
-                    : (_isUsingCustomLocation ? 'Selected Location' : 'Your Location'), 
+                  Text(isUrdu
+                    ? (_isUsingCustomLocation ? 'منتخب مقام' : 'آپ کا مقام')
+                    : (_isUsingCustomLocation ? 'Selected Location' : 'Your Location'),
                     style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: primaryColor)),
                   const Spacer(),
                   if (_isUsingCustomLocation)
@@ -622,7 +664,7 @@ class _MosqueMapScreenState extends State<MosqueMapScreen> with TickerProviderSt
                 ],
               ),
               const SizedBox(height: 4),
-              _isFetchingAddress 
+              _isFetchingAddress
                 ? const SizedBox(height: 14, width: 14, child: CircularProgressIndicator(strokeWidth: 1.5))
                 : Text(_userAddress, style: TextStyle(fontSize: 10.5, color: isDark ? Colors.white70 : Colors.black54), maxLines: 1, overflow: TextOverflow.ellipsis),
             ],

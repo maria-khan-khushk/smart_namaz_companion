@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 class AppColors {
   // Light mode colors (bilkul pehle jaisay)
@@ -23,6 +24,54 @@ class AppColors {
 }
 
 class AppTheme {
+  // Arabic & Urdu premium typography helper
+  static TextStyle arabicStyle({
+    required double fontSize,
+    FontWeight fontWeight = FontWeight.normal,
+    Color? color,
+    double? height,
+  }) {
+    return GoogleFonts.notoSansArabic(
+      fontSize: fontSize,
+      fontWeight: fontWeight,
+      color: color,
+      height: height,
+    );
+  }
+
+  // Base font style for English text
+  static TextStyle englishStyle({
+    required double fontSize,
+    FontWeight fontWeight = FontWeight.normal,
+    Color? color,
+    double? letterSpacing,
+  }) {
+    return GoogleFonts.plusJakartaSans(
+      fontSize: fontSize,
+      fontWeight: fontWeight,
+      color: color,
+      letterSpacing: letterSpacing,
+    );
+  }
+
+  static TextTheme _buildTextTheme(TextTheme base, Color textColor, Color secondaryColor) {
+    return TextTheme(
+      displayLarge: GoogleFonts.plusJakartaSans(textStyle: base.displayLarge, color: textColor),
+      displayMedium: GoogleFonts.plusJakartaSans(textStyle: base.displayMedium, color: textColor),
+      displaySmall: GoogleFonts.plusJakartaSans(textStyle: base.displaySmall, color: textColor),
+      headlineLarge: GoogleFonts.plusJakartaSans(textStyle: base.headlineLarge, color: textColor, fontWeight: FontWeight.bold),
+      headlineMedium: GoogleFonts.plusJakartaSans(textStyle: base.headlineMedium, color: textColor, fontWeight: FontWeight.bold),
+      headlineSmall: GoogleFonts.plusJakartaSans(textStyle: base.headlineSmall, color: textColor, fontWeight: FontWeight.bold),
+      titleLarge: GoogleFonts.plusJakartaSans(textStyle: base.titleLarge, color: textColor, fontWeight: FontWeight.bold),
+      titleMedium: GoogleFonts.plusJakartaSans(textStyle: base.titleMedium, color: textColor, fontWeight: FontWeight.w600),
+      titleSmall: GoogleFonts.plusJakartaSans(textStyle: base.titleSmall, color: textColor, fontWeight: FontWeight.w600),
+      bodyLarge: GoogleFonts.plusJakartaSans(textStyle: base.bodyLarge, color: textColor),
+      bodyMedium: GoogleFonts.plusJakartaSans(textStyle: base.bodyMedium, color: secondaryColor),
+      bodySmall: GoogleFonts.plusJakartaSans(textStyle: base.bodySmall, color: secondaryColor),
+      labelLarge: GoogleFonts.plusJakartaSans(textStyle: base.labelLarge, color: textColor, fontWeight: FontWeight.w600),
+    );
+  }
+
   static ThemeData lightTheme = ThemeData(
     brightness: Brightness.light,
     scaffoldBackgroundColor: AppColors.lightBackground,
@@ -37,23 +86,36 @@ class AppTheme {
       backgroundColor: AppColors.primaryMuted,
       foregroundColor: Colors.white,
       elevation: 0,
+      centerTitle: true,
+      titleTextStyle: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+    ),
+    bottomNavigationBarTheme: const BottomNavigationBarThemeData(
+      backgroundColor: Colors.white,
+      selectedItemColor: AppColors.primaryMuted,
+      unselectedItemColor: Colors.black45,
+      selectedLabelStyle: TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+      unselectedLabelStyle: TextStyle(fontWeight: FontWeight.w500, fontSize: 12),
+      selectedIconTheme: IconThemeData(color: AppColors.primaryMuted, size: 24),
+      unselectedIconTheme: IconThemeData(color: Colors.black45, size: 24),
+      type: BottomNavigationBarType.fixed,
+      elevation: 8,
     ),
     elevatedButtonTheme: ElevatedButtonThemeData(
       style: ElevatedButton.styleFrom(
         backgroundColor: AppColors.primaryMuted,
         foregroundColor: Colors.white,
+        elevation: 0,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        textStyle: const TextStyle(fontWeight: FontWeight.bold),
       ),
     ),
-    cardTheme: CardThemeData(  // ✅ Fixed: CardTheme → CardThemeData
+    cardTheme: CardThemeData(
       color: Colors.white,
       elevation: 2,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       margin: const EdgeInsets.all(8),
     ),
-    textTheme: const TextTheme(
-      bodyLarge: TextStyle(color: Colors.black87),
-      bodyMedium: TextStyle(color: Colors.black54),
-    ),
+    textTheme: _buildTextTheme(ThemeData.light().textTheme, Colors.black87, Colors.black54),
   );
 
   static ThemeData darkTheme = ThemeData(
@@ -77,34 +139,36 @@ class AppTheme {
       backgroundColor: AppColors.darkSurface,
       foregroundColor: Colors.white,
       elevation: 0,
+      centerTitle: true,
+      titleTextStyle: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+    ),
+    bottomNavigationBarTheme: const BottomNavigationBarThemeData(
+      backgroundColor: AppColors.darkBackground,
+      selectedItemColor: AppColors.darkPrimaryMuted,
+      unselectedItemColor: AppColors.darkTextSecondary,
+      selectedLabelStyle: TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+      unselectedLabelStyle: TextStyle(fontWeight: FontWeight.w500, fontSize: 12),
+      selectedIconTheme: IconThemeData(color: AppColors.darkPrimaryMuted, size: 24),
+      unselectedIconTheme: IconThemeData(color: AppColors.darkTextSecondary, size: 24),
+      type: BottomNavigationBarType.fixed,
+      elevation: 8,
     ),
     elevatedButtonTheme: ElevatedButtonThemeData(
       style: ElevatedButton.styleFrom(
         backgroundColor: AppColors.darkPrimaryMuted,
         foregroundColor: Colors.white,
+        elevation: 0,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        textStyle: const TextStyle(fontWeight: FontWeight.bold),
       ),
     ),
-    cardTheme: CardThemeData(  // ✅ Fixed: CardTheme → CardThemeData
+    cardTheme: CardThemeData(
       color: AppColors.darkCard,
       elevation: 4,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       margin: const EdgeInsets.all(8),
     ),
-    textTheme: const TextTheme(
-      displayLarge: TextStyle(color: AppColors.darkTextPrimary),
-      displayMedium: TextStyle(color: AppColors.darkTextPrimary),
-      displaySmall: TextStyle(color: AppColors.darkTextPrimary),
-      headlineLarge: TextStyle(color: AppColors.darkTextPrimary),
-      headlineMedium: TextStyle(color: AppColors.darkTextPrimary),
-      headlineSmall: TextStyle(color: AppColors.darkTextPrimary),
-      titleLarge: TextStyle(color: AppColors.darkTextPrimary),
-      titleMedium: TextStyle(color: AppColors.darkTextPrimary),
-      titleSmall: TextStyle(color: AppColors.darkTextPrimary),
-      bodyLarge: TextStyle(color: AppColors.darkTextPrimary),
-      bodyMedium: TextStyle(color: AppColors.darkTextSecondary),
-      bodySmall: TextStyle(color: AppColors.darkTextSecondary),
-      labelLarge: TextStyle(color: AppColors.darkTextPrimary),
-    ),
+    textTheme: _buildTextTheme(ThemeData.dark().textTheme, AppColors.darkTextPrimary, AppColors.darkTextSecondary),
     iconTheme: const IconThemeData(
       color: AppColors.darkPrimaryMuted,
     ),

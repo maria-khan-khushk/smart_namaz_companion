@@ -118,12 +118,12 @@ class _StreakTrackerScreenState extends State<StreakTrackerScreen>
     return '${months[d.month - 1]} ${d.day}, ${d.year}';
   }
 
-  // Color based on completion
-  Color _dayColor(DailyPrayerRecord? record, Color primary) {
-    if (record == null) return Colors.transparent;
-    if (record.allCompleted) return Colors.green;
-    if (record.completedCount > 0) return Colors.orange;
-    return Colors.red.shade300;
+  Color _heatmapColor(int completedCount, Color primary, bool isDark) {
+    if (completedCount <= 0) {
+      return isDark ? Colors.white.withOpacity(0.05) : primary.withOpacity(0.05);
+    }
+    final strength = 0.16 + (completedCount / _prayerNames.length) * 0.62;
+    return primary.withOpacity(isDark ? strength + 0.08 : strength);
   }
 
   @override
@@ -212,8 +212,9 @@ class _StreakTrackerScreenState extends State<StreakTrackerScreen>
         children: [
           // Current streak
           Expanded(child: _streakStat(
-            icon: Icons.local_fire_department_rounded,
-            iconColor: Colors.orange.shade300,
+            icon: Icons.trending_up_rounded,
+            iconColor: Colors.white,
+            badgeColor: const Color(0xFF8EA081),
             value: '$_currentStreak',
             label: isUrdu ? 'موجودہ اسٹریک' : 'Current Streak',
           )),
@@ -223,8 +224,9 @@ class _StreakTrackerScreenState extends State<StreakTrackerScreen>
 
           // Best streak
           Expanded(child: _streakStat(
-            icon: Icons.emoji_events_rounded,
-            iconColor: Colors.amber.shade300,
+            icon: Icons.workspace_premium_rounded,
+            iconColor: Colors.white,
+            badgeColor: const Color(0xFFB39448),
             value: '$_bestStreak',
             label: isUrdu ? 'بہترین اسٹریک' : 'Best Streak',
           )),
@@ -235,7 +237,8 @@ class _StreakTrackerScreenState extends State<StreakTrackerScreen>
           // Total days recorded
           Expanded(child: _streakStat(
             icon: Icons.calendar_month_rounded,
-            iconColor: Colors.lightBlue.shade200,
+            iconColor: Colors.white,
+            badgeColor: const Color(0xFF78918F),
             value: '${_records.length}',
             label: isUrdu ? 'کل دن' : 'Days Logged',
           )),
@@ -247,12 +250,29 @@ class _StreakTrackerScreenState extends State<StreakTrackerScreen>
   Widget _streakStat({
     required IconData icon,
     required Color iconColor,
+    required Color badgeColor,
     required String value,
     required String label,
   }) {
     return Column(
       children: [
-        Icon(icon, color: iconColor, size: 24),
+        Container(
+          width: 34,
+          height: 34,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: badgeColor.withOpacity(0.95),
+            border: Border.all(color: Colors.white.withOpacity(0.32), width: 1),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.12),
+                blurRadius: 8,
+                offset: const Offset(0, 3),
+              ),
+            ],
+          ),
+          child: Icon(icon, color: iconColor, size: 18),
+        ),
         const SizedBox(height: 4),
         Text(value, style: const TextStyle(
           color: Colors.white, fontSize: 26, fontWeight: FontWeight.bold, height: 1)),
@@ -313,39 +333,61 @@ class _StreakTrackerScreenState extends State<StreakTrackerScreen>
               color: primary.withOpacity(0.8),
             ),
           ),
-          calendarStyle: CalendarStyle(
+          calendarStyle: const CalendarStyle(
             outsideDaysVisible: false,
-            todayDecoration: BoxDecoration(
-              color: primary.withOpacity(0.15),
-              shape: BoxShape.circle,
-            ),
-            todayTextStyle: TextStyle(color: primary, fontWeight: FontWeight.bold),
-            selectedDecoration: BoxDecoration(
-              color: primary,
-              shape: BoxShape.circle,
-            ),
-            selectedTextStyle: const TextStyle(
-                color: Colors.white, fontWeight: FontWeight.bold),
-            defaultTextStyle: TextStyle(
-              color: Theme.of(context).textTheme.bodyLarge?.color,
-            ),
-            weekendTextStyle: TextStyle(
-              color: primary.withOpacity(0.85),
-            ),
           ),
           calendarBuilders: CalendarBuilders(
-            markerBuilder: (context, day, events) {
-              final record = _records[DateTime(day.year, day.month, day.day)];
-              if (record == null) return null;
-              final color = _dayColor(record, primary);
-              return Positioned(
-                bottom: 4,
-                child: Container(
-                  width: 6, height: 6,
-                  decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-                ),
-              );
-            },
+            defaultBuilder: (context, day, focusedDay) => _buildHeatmapCell(day, false, false, primary, isDark),
+            todayBuilder: (context, day, focusedDay) => _buildHeatmapCell(day, true, false, primary, isDark),
+            selectedBuilder: (context, day, focusedDay) => _buildHeatmapCell(day, false, true, primary, isDark),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHeatmapCell(DateTime day, bool isToday, bool isSelected, Color primary, bool isDark) {
+    final normalized = DateTime(day.year, day.month, day.day);
+    final record = _records[normalized];
+
+    // Calculate how many prayers were completed on this day (0 to 5)
+    final completedCount = record?.prayersCompleted.values.where((v) => v).length ?? 0;
+
+    final cellColor = _heatmapColor(completedCount, primary, isDark);
+
+    final textColor = isSelected
+        ? Colors.white
+        : completedCount >= 4
+            ? Colors.white
+        : isToday
+            ? primary
+            : isDark
+                ? Colors.white.withOpacity(0.9)
+                : Colors.black87;
+
+    return Container(
+      margin: const EdgeInsets.all(3.0),
+      decoration: BoxDecoration(
+        color: cellColor,
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(
+          color: isSelected
+              ? primary
+              : isToday
+                  ? primary.withOpacity(0.5)
+                  : isDark
+                      ? Colors.white.withOpacity(0.08)
+                      : Colors.grey.shade200,
+          width: isSelected ? 2.0 : 1.0,
+        ),
+      ),
+      child: Center(
+        child: Text(
+          '${day.day}',
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: isToday || isSelected ? FontWeight.bold : FontWeight.w500,
+            color: textColor,
           ),
         ),
       ),
@@ -425,7 +467,7 @@ class _StreakTrackerScreenState extends State<StreakTrackerScreen>
             const SizedBox(height: 6),
             Text(
               completedCount == 5
-                  ? (isUrdu ? '🎉 تمام نمازیں ادا کر لی گئیں!' : '🎉 All prayers completed!')
+                  ? (isUrdu ? 'تمام نمازیں ادا کر لی گئیں!' : 'All prayers completed!')
                   : isUrdu
                       ? '${_prayerNames.length - completedCount} نمازیں باقی ہیں'
                       : '${_prayerNames.length - completedCount} remaining',
