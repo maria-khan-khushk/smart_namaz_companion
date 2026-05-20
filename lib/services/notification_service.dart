@@ -3,10 +3,46 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:android_alarm_manager_plus/android_alarm_manager_plus.dart';
 import 'package:timezone/timezone.dart' as tz;
 import 'package:timezone/data/latest.dart' as tz;
+import 'package:flutter_timezone/flutter_timezone.dart';
 import '../services/hadith_service.dart';
 import '../providers/language_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../services/streak_service.dart';
+import '../models/daily_prayer_record.dart';
+
+@pragma('vm:entry-point')
+void notificationTapBackground(NotificationResponse response) async {
+  if (response.actionId == 'prayed') {
+    final prayerName = response.payload;
+    if (prayerName != null && prayerName.isNotEmpty) {
+      final streakService = StreakService();
+      final now = DateTime.now();
+      final date = DateTime(now.year, now.month, now.day);
+      var records = await streakService.getAllRecords();
+      var record = records[date];
+      if (record == null) {
+        record = DailyPrayerRecord(
+          date: date,
+          prayersCompleted: {'Fajr': false, 'Dhuhr': false, 'Asr': false, 'Maghrib': false, 'Isha': false},
+        );
+      }
+      record.prayersCompleted[prayerName] = true;
+      await streakService.saveRecord(record);
+    }
+  } else if (response.actionId == 'snooze') {
+    final prayerName = response.payload;
+    if (prayerName != null && prayerName.isNotEmpty) {
+      await NotificationService.initializeTimeZonesIfNeeded();
+      await NotificationService.scheduleInteractiveReminder(
+        id: response.id != null ? response.id! + 100 : 9999,
+        prayerName: prayerName,
+        scheduledTime: DateTime.now().add(const Duration(minutes: 15)),
+      );
+    }
+  }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Top-level callback — AndroidAlarmManager fires this even when app is closed.
@@ -44,7 +80,7 @@ Future<void> azanAlarmCallback() async {
 
   await notifications.show(
     DateTime.now().millisecondsSinceEpoch ~/ 1000,
-    'Prayer Time 🕌',
+    'Prayer Time',
     'It is time for prayer.',
     const NotificationDetails(android: androidDetails),
   );
@@ -84,8 +120,20 @@ class NotificationService {
 
   // ── Initialize ─────────────────────────────────────────────────────────────
 
+  static Future<void> initializeTimeZonesIfNeeded() async {
+    if (!tz.timeZoneDatabase.isInitialized) {
+      tz.initializeTimeZones();
+      try {
+        final String timeZoneName = await FlutterTimezone.getLocalTimezone();
+        tz.setLocalLocation(tz.getLocation(timeZoneName));
+      } catch (e) {
+        tz.setLocalLocation(tz.getLocation('UTC'));
+      }
+    }
+  }
+
   static Future<void> initialize() async {
-    if (!tz.timeZoneDatabase.isInitialized) tz.initializeTimeZones();
+    await initializeTimeZonesIfNeeded();
 
     const AndroidInitializationSettings androidSettings =
         AndroidInitializationSettings('@mipmap/ic_launcher');
@@ -98,6 +146,7 @@ class NotificationService {
     await _notifications.initialize(
       const InitializationSettings(android: androidSettings, iOS: iosSettings),
       onDidReceiveNotificationResponse: _onNotificationTap,
+      onDidReceiveBackgroundNotificationResponse: notificationTapBackground,
     );
 
     await AndroidAlarmManager.initialize();
@@ -166,6 +215,19 @@ class NotificationService {
     print('Notification channels created (azan sound channel ready)');
   }
 
+  static Future<bool> requestAlarmPermissions() async {
+    final plugin = _notifications
+        .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>();
+    if (plugin == null) return true;
+
+    final notificationsAllowed =
+        await plugin.requestNotificationsPermission() ?? true;
+    final exactAllowed =
+        await plugin.requestExactAlarmsPermission() ?? true;
+    return notificationsAllowed && exactAllowed;
+  }
+
   // ── Manual reminder — azan.mp3 plays automatically when notification fires ──
   //
   // Uses reminder_azan_channel which has azan.mp3 at channel level.
@@ -179,6 +241,10 @@ class NotificationService {
     String? soundPath,
   }) async {
     if (!tz.timeZoneDatabase.isInitialized) tz.initializeTimeZones();
+    final allowed = await requestAlarmPermissions();
+    if (!allowed) {
+      throw Exception('Notification and exact alarm permissions are required.');
+    }
 
     final AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
       _reminderChannelId,               // ← custom azan sound channel
@@ -208,7 +274,7 @@ class NotificationService {
       body,
       tzTime,
       NotificationDetails(android: androidDetails, iOS: iosDetails),
-      androidAllowWhileIdle: true,
+      androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
       uiLocalNotificationDateInterpretation:
           UILocalNotificationDateInterpretation.absoluteTime,
       payload: 'manual_reminder',
@@ -253,10 +319,30 @@ class NotificationService {
             rescheduleOnReboot: true,
           );
           print('Azan alarm set: id=${entry.key} at $prayerTime');
+          
+          // Schedule Interactive Reminder
+          final prefs = await SharedPreferences.getInstance();
+          final interval = prefs.getInt('reminder_interval') ?? 30;
+          await scheduleInteractiveReminder(
+            id: entry.key + 2000,
+            prayerName: getPrayerNameFromId(entry.key),
+            scheduledTime: prayerTime.add(Duration(minutes: interval)),
+          );
         }
       } catch (e) {
         print('Error scheduling azan alarm id=${entry.key}: $e');
       }
+    }
+  }
+
+  static String getPrayerNameFromId(int id) {
+    switch (id) {
+      case _AzanIds.fajr: return 'Fajr';
+      case _AzanIds.dhuhr: return 'Dhuhr';
+      case _AzanIds.asr: return 'Asr';
+      case _AzanIds.maghrib: return 'Maghrib';
+      case _AzanIds.isha: return 'Isha';
+      default: return 'Prayer';
     }
   }
 
@@ -266,8 +352,50 @@ class NotificationService {
       _AzanIds.maghrib, _AzanIds.isha,
     ]) {
       await AndroidAlarmManager.cancel(id);
+      await _notifications.cancel(id + 2000); // cancel reminder too
     }
-    print('All azan alarms cancelled');
+    print('All azan alarms and reminders cancelled');
+  }
+
+  // ── Interactive Reminder ──────────────────────────────────────────────────
+  static Future<void> scheduleInteractiveReminder({
+    required int id,
+    required String prayerName,
+    required DateTime scheduledTime,
+  }) async {
+    await initializeTimeZonesIfNeeded();
+    final allowed = await requestAlarmPermissions();
+    if (!allowed) return;
+
+    final AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
+      _defaultChannelId,
+      'Azan Notifications',
+      channelDescription: 'Prayer time notifications',
+      importance: Importance.max,
+      priority: Priority.high,
+      playSound: true,
+      enableVibration: true,
+      actions: <AndroidNotificationAction>[
+        const AndroidNotificationAction('prayed', 'Prayed', showsUserInterface: true, cancelNotification: true),
+        const AndroidNotificationAction('snooze', 'Snooze 15m', showsUserInterface: true, cancelNotification: true),
+        const AndroidNotificationAction('skip', 'Skip', showsUserInterface: true, cancelNotification: true),
+      ],
+    );
+
+    const DarwinNotificationDetails iosDetails = DarwinNotificationDetails(
+      presentAlert: true, presentSound: true, presentBadge: true,
+    );
+
+    await _notifications.zonedSchedule(
+      id,
+      'Did you pray $prayerName?',
+      'Tap to log it in your streak tracker.',
+      tz.TZDateTime.from(scheduledTime, tz.local),
+      NotificationDetails(android: androidDetails, iOS: iosDetails),
+      androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+      uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime,
+      payload: prayerName,
+    );
   }
 
   // ── Generic notification (hadith, test) ─────────────────────────────────────
@@ -280,6 +408,10 @@ class NotificationService {
     String? soundPath,
   }) async {
     if (!tz.timeZoneDatabase.isInitialized) tz.initializeTimeZones();
+    final allowed = await requestAlarmPermissions();
+    if (!allowed) {
+      throw Exception('Notification and exact alarm permissions are required.');
+    }
 
     final AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
       _defaultChannelId,
@@ -307,7 +439,7 @@ class NotificationService {
       body,
       tzTime,
       NotificationDetails(android: androidDetails, iOS: iosDetails),
-      androidAllowWhileIdle: true,
+      androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
       uiLocalNotificationDateInterpretation:
           UILocalNotificationDateInterpretation.absoluteTime,
       payload: 'azan_reminder',

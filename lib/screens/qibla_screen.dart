@@ -1,12 +1,14 @@
 import 'dart:convert';
 import 'dart:math';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_compass/flutter_compass.dart';
 import '../providers/language_provider.dart';
+import 'mosque_map_screen.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Mosque model
@@ -47,6 +49,13 @@ class _QiblaScreenState extends State<QiblaScreen>
   late Animation<double> _animation;
   double _lastArrowAngle = 0;
 
+  // ValueNotifier for heading — prevents full-tree rebuilds on every sensor tick.
+  // Only the compass widget listens to this, not the entire screen.
+  final ValueNotifier<double> _headingNotifier = ValueNotifier<double>(0.0);
+
+  bool _isAligned = false;
+  double? _lastHeading;
+
   static const double kaabaLat = 21.4225;
   static const double kaabaLon = 39.8262;
 
@@ -65,10 +74,10 @@ class _QiblaScreenState extends State<QiblaScreen>
     super.initState();
     _animController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 80), // matches update rate
+      duration: const Duration(milliseconds: 180), // smoother transition duration
     );
     _animation = Tween<double>(begin: 0, end: 0).animate(
-      CurvedAnimation(parent: _animController, curve: Curves.easeOut),
+      CurvedAnimation(parent: _animController, curve: Curves.easeOutCubic),
     );
     _checkPermissionsAndGetLocation();
     _startCompass();
@@ -78,6 +87,7 @@ class _QiblaScreenState extends State<QiblaScreen>
   void dispose() {
     _compassSubscription?.cancel();
     _animController.dispose();
+    _headingNotifier.dispose();
     super.dispose();
   }
 
@@ -99,25 +109,49 @@ class _QiblaScreenState extends State<QiblaScreen>
       final heading = event.heading;
       if (heading == null || !mounted) return;
 
-      // heading is 0–360, where 0 = North
-      // Arrow angle = how much to rotate from pointing up (North) to point at Qibla
-      final targetAngle = (_qiblaBearing - heading) * pi / 180;
+      // Apply Exponential Moving Average (EMA) filter to smooth out sensor micro-jitter
+      final smoothedHeading = _lastHeading == null
+          ? heading
+          : _lastHeading! + 0.18 * (heading - _lastHeading!);
+      _lastHeading = smoothedHeading;
+
+      // Update heading value
+      _deviceHeading = (smoothedHeading + 360) % 360;
+
+      // Target angle relative to device's top
+      final targetAngle = (_qiblaBearing - _deviceHeading) * pi / 180;
       double diff = targetAngle - _lastArrowAngle;
       while (diff > pi)  diff -= 2 * pi;
       while (diff < -pi) diff += 2 * pi;
 
-      // Skip tiny changes to avoid jitter when phone is still
-      if (diff.abs() < 0.008) return;
+      // Skip tiny changes to avoid micro-jitters
+      if (diff.abs() < 0.005) return;
 
       final newTarget = _lastArrowAngle + diff;
 
       _animation = Tween<double>(begin: _lastArrowAngle, end: newTarget).animate(
-        CurvedAnimation(parent: _animController, curve: Curves.easeOut),
+        CurvedAnimation(parent: _animController, curve: Curves.easeOutCubic),
       );
       _animController.forward(from: 0);
       _lastArrowAngle = newTarget;
 
-      setState(() => _deviceHeading = (heading + 360) % 360);
+      // Alignment check (within ±5.7 degrees)
+      double normDiff = targetAngle % (2 * pi);
+      if (normDiff > pi) normDiff -= 2 * pi;
+      if (normDiff < -pi) normDiff += 2 * pi;
+      final bool aligned = normDiff.abs() < 0.1;
+
+      if (aligned != _isAligned) {
+        setState(() {
+          _isAligned = aligned;
+        });
+        if (aligned) {
+          HapticFeedback.mediumImpact();
+        }
+      }
+
+      // Update heading via ValueNotifier
+      _headingNotifier.value = _deviceHeading;
     });
   }
 
@@ -149,14 +183,26 @@ class _QiblaScreenState extends State<QiblaScreen>
     }
 
     try {
+      // Use higher frequency and forced manager for initial lock
       final pos = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(accuracy: LocationAccuracy.medium),
-      );
+        locationSettings: AndroidSettings(
+          accuracy: LocationAccuracy.high,
+          forceLocationManager: true,
+          intervalDuration: const Duration(seconds: 1),
+        ),
+      ).timeout(const Duration(seconds: 15), onTimeout: () async {
+        return await Geolocator.getLastKnownPosition() ?? Position(
+          latitude: 24.8934, longitude: 67.0894, // Fallback to Karachi (Bahria University area)
+          timestamp: DateTime.now(), accuracy: 0, altitude: 0,
+          heading: 0, speed: 0, speedAccuracy: 0,
+          altitudeAccuracy: 0, headingAccuracy: 0,
+        );
+      });
       _currentPosition = pos;
       _calculateQiblaBearing(pos.latitude, pos.longitude);
-      setState(() { _hasLocation = true; _isLoading = false; });
+      if (mounted) setState(() { _hasLocation = true; _isLoading = false; });
     } catch (e) {
-      setState(() { _isLoading = false; _errorMessage = 'Failed to get location: $e'; });
+      if (mounted) setState(() { _isLoading = false; _errorMessage = 'Failed to get location: $e'; });
     }
   }
 
@@ -179,6 +225,85 @@ class _QiblaScreenState extends State<QiblaScreen>
     setState(() => _qiblaBearing = (bearing + 360) % 360);
   }
 
+  // ── Manual Location Override with Suggestions ───────────────────────────
+  Future<void> _setManualLocation(String query) async {
+    setState(() { _isLoading = true; _errorMessage = ''; });
+    try {
+      final url = 'https://nominatim.openstreetmap.org/search?q=${Uri.encodeComponent(query)}&format=json&limit=5';
+      final resp = await http.get(Uri.parse(url), headers: {'User-Agent': 'SmartNamazCompanion/1.0'});
+      if (resp.statusCode == 200) {
+        final data = jsonDecode(resp.body) as List;
+        if (data.isEmpty) {
+          setState(() { _isLoading = false; _errorMessage = 'No locations found. Try "Karachi".'; });
+          return;
+        }
+
+        setState(() => _isLoading = false);
+
+        // Show suggestions if multiple found, otherwise pick first
+        if (data.length > 1) {
+          _showLocationPicker(data);
+        } else {
+          _applyLocation(data[0]);
+        }
+      }
+    } catch (e) {
+      setState(() { _isLoading = false; _errorMessage = 'Search failed: $e'; });
+    }
+  }
+
+  void _showLocationPicker(List<dynamic> suggestions) {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => Container(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Select exact location:', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 12),
+            Flexible(
+              child: ListView.builder(
+                shrinkWrap: true,
+                itemCount: suggestions.length,
+                itemBuilder: (context, i) {
+                  final s = suggestions[i];
+                  return ListTile(
+                    leading: const Icon(Icons.location_on_outlined),
+                    title: Text(s['display_name'].split(',')[0], style: const TextStyle(fontWeight: FontWeight.bold)),
+                    subtitle: Text(s['display_name'], maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11)),
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      _applyLocation(s);
+                    },
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _applyLocation(Map<String, dynamic> locationData) {
+    final lat = double.parse(locationData['lat']);
+    final lon = double.parse(locationData['lon']);
+
+    _currentPosition = Position(
+      latitude: lat, longitude: lon,
+      timestamp: DateTime.now(), accuracy: 0, altitude: 0,
+      heading: 0, speed: 0, speedAccuracy: 0,
+      altitudeAccuracy: 0, headingAccuracy: 0,
+    );
+
+    _calculateQiblaBearing(lat, lon);
+    setState(() => _hasLocation = true);
+    _findNearbyMosques();
+  }
+
   // ─────────────────────────────────────────────────────────────────────────
   // ─────────────────────────────────────────────────────────────────────────
   // Mosque finder — multi-API waterfall (Nominatim → Overpass mirrors)
@@ -194,18 +319,39 @@ class _QiblaScreenState extends State<QiblaScreen>
     final lat = _currentPosition!.latitude;
     final lon = _currentPosition!.longitude;
 
-    // Try each source in order — first success wins
     List<_Mosque>? result;
 
-    result ??= await _fetchViaNominatim(lat, lon);
-    result ??= await _fetchViaOverpass(lat, lon, 'https://overpass-api.de/api/interpreter');
-    result ??= await _fetchViaOverpass(lat, lon, 'https://overpass.kumi.systems/api/interpreter');
-    result ??= await _fetchViaOverpass(lat, lon, 'https://maps.mail.ru/osm/tools/overpass/api/interpreter');
+    // Gradually expanding radius: 3km, 10km, 25km, 50km
+    final List<double> deltas = [0.027, 0.09, 0.22, 0.45];
+    final List<int> overpassRadii = [3000, 10000, 25000, 50000];
+
+    for (int i = 0; i < deltas.length; i++) {
+      final delta = deltas[i];
+      final radius = overpassRadii[i];
+
+      print('[QiblaMosques] Querying at radius: ${radius / 1000} km...');
+      result = await _fetchViaNominatim(lat, lon, delta);
+
+      if (result == null || result.isEmpty) {
+        result = await _fetchViaOverpass(lat, lon, 'https://overpass-api.de/api/interpreter', radius);
+      }
+      if (result == null || result.isEmpty) {
+        result = await _fetchViaOverpass(lat, lon, 'https://overpass.kumi.systems/api/interpreter', radius);
+      }
+
+      if (result != null && result.length >= 3) {
+        print('[QiblaMosques] Found sufficient mosques (${result.length}) at radius: ${radius / 1000} km.');
+        break;
+      }
+    }
 
     if (result != null) {
       result.sort((a, b) => a.distanceKm.compareTo(b.distanceKm));
+
+      // Limit to closest 4 mosques for sparse list display
+      final limit = result.length > 4 ? 4 : result.length;
       setState(() {
-        _mosques = result!;
+        _mosques = result!.take(limit).toList();
         _mosquesLoaded = true;
         _isFindingMosques = false;
         _mosqueError = result!.isEmpty ? 'No mosques found nearby.' : '';
@@ -225,14 +371,13 @@ class _QiblaScreenState extends State<QiblaScreen>
   }
 
   /// Source 1: Nominatim geocoding — lightweight GET, usually fastest
-  Future<List<_Mosque>?> _fetchViaNominatim(double lat, double lon) async {
+  Future<List<_Mosque>?> _fetchViaNominatim(double lat, double lon, double delta) async {
     try {
-      final double delta = 0.45; // ~50 km bounding box — find whatever is nearest
       final uri = Uri.parse(
         'https://nominatim.openstreetmap.org/search'
         '?format=json&q=mosque&bounded=1'
         '&viewbox=${lon-delta},${lat+delta},${lon+delta},${lat-delta}'
-        '&limit=40&addressdetails=0',
+        '&limit=15&addressdetails=0',
       );
       final resp = await http.get(uri, headers: {
         'User-Agent': 'SmartNamazCompanion/1.0',
@@ -256,25 +401,24 @@ class _QiblaScreenState extends State<QiblaScreen>
       final seen = <String>{};
       final deduped = list.where((m) => seen.add('${m.name}_${m.lat.toStringAsFixed(3)}')).toList();
       deduped.sort((a, b) => a.distanceKm.compareTo(b.distanceKm));
-      return deduped.take(20).toList();
+      return deduped.toList();
     } catch (e) {
-      print('[MosqueFinder] Nominatim failed: \$e');
+      print('[MosqueFinder] Nominatim failed: $e');
       return null;
     }
   }
 
   /// Source 2+: Overpass API mirrors — richer data, slower
-  Future<List<_Mosque>?> _fetchViaOverpass(double lat, double lon, String endpoint) async {
+  Future<List<_Mosque>?> _fetchViaOverpass(double lat, double lon, String endpoint, int radiusMeters) async {
     try {
-      const r = 50000; // 50 km — find nearest regardless of distance
       final query =
           '[out:json][timeout:20];'
           '('
-          'node["amenity"="place_of_worship"]["religion"="muslim"](around:$r,$lat,$lon);'
-          'way["amenity"="place_of_worship"]["religion"="muslim"](around:$r,$lat,$lon);'
-          'node["amenity"="mosque"](around:$r,$lat,$lon);'
-          'way["amenity"="mosque"](around:$r,$lat,$lon);'
-          ');out center 40;';
+          'node["amenity"="place_of_worship"]["religion"="muslim"](around:$radiusMeters,$lat,$lon);'
+          'way["amenity"="place_of_worship"]["religion"="muslim"](around:$radiusMeters,$lat,$lon);'
+          'node["amenity"="mosque"](around:$radiusMeters,$lat,$lon);'
+          'way["amenity"="mosque"](around:$radiusMeters,$lat,$lon);'
+          ');out center 20;';
 
       final resp = await http.post(
         Uri.parse(endpoint),
@@ -353,6 +497,7 @@ class _QiblaScreenState extends State<QiblaScreen>
   }
 
   Widget _buildBody(bool isUrdu, Color primaryColor, Color cardColor, Color textSecondary) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     if (_isLoading) {
       return Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
         CircularProgressIndicator(color: primaryColor),
@@ -372,7 +517,19 @@ class _QiblaScreenState extends State<QiblaScreen>
           const SizedBox(height: 16),
           ElevatedButton(
             onPressed: _checkPermissionsAndGetLocation,
-            child: Text(isUrdu ? 'دوبارہ کوشش کریں' : 'Retry'),
+            child: Text(isUrdu ? 'دوبارہ کوشش کریں' : 'Retry GPS'),
+          ),
+          const SizedBox(height: 12),
+          Text(isUrdu ? 'یا دستی طور پر شہر تلاش کریں:' : 'Or search city manually:', style: TextStyle(fontSize: 12, color: textSecondary)),
+          const SizedBox(height: 8),
+          TextField(
+            onSubmitted: (val) => _setManualLocation(val),
+            decoration: InputDecoration(
+              hintText: isUrdu ? 'شہر کا نام لکھیں (مثلاً کراچی)' : 'Enter city (e.g. Karachi)',
+              prefixIcon: const Icon(Icons.search),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+            ),
           ),
         ]),
       ));
@@ -392,20 +549,51 @@ class _QiblaScreenState extends State<QiblaScreen>
           // ════════════════════════════════════════════════════════════════
           const SizedBox(height: 24),
           Card(
-            elevation: 8,
+            elevation: _isAligned ? 12 : 4,
             margin: const EdgeInsets.symmetric(horizontal: 24),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(30),
+              side: BorderSide(
+                color: _isAligned
+                    ? const Color(0xFFD4AF37).withOpacity(0.8) // Golden border when aligned!
+                    : Colors.transparent,
+                width: 2.0
+              ),
+            ),
             color: cardColor,
-            child: Container(
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 300),
               width: 260, height: 260,
               padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(30),
+                gradient: _isAligned
+                    ? LinearGradient(
+                        colors: isDark
+                            ? [const Color(0xFF1E2B1E), cardColor]
+                            : [const Color(0xFFECF7EC), cardColor],
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                      )
+                    : null,
+                boxShadow: _isAligned
+                    ? [
+                        BoxShadow(
+                          color: const Color(0xFFD4AF37).withOpacity(isDark ? 0.15 : 0.25),
+                          blurRadius: 24,
+                          spreadRadius: 1,
+                        )
+                      ]
+                    : null,
+              ),
               child: AnimatedBuilder(
                 animation: _animation,
                 builder: (context, _) => CustomPaint(
                   painter: QiblaCompassPainter(
                     arrowAngleRad: _animation.value,
                     deviceHeadingDeg: _deviceHeading,
-                    primaryColor: primaryColor,
+                    primaryColor: _isAligned ? const Color(0xFFD4AF37) : primaryColor,
+                    isAligned: _isAligned,
                   ),
                 ),
               ),
@@ -413,14 +601,17 @@ class _QiblaScreenState extends State<QiblaScreen>
           ),
           const SizedBox(height: 24),
 
-          // Info cards row
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              _infoCard(isUrdu ? 'قبلہ' : 'Qibla', '${_qiblaBearing.toStringAsFixed(0)}°', primaryColor, cardColor, textSecondary),
-              const SizedBox(width: 16),
-              _infoCard(isUrdu ? 'فون کی سمت' : 'Heading', '${_deviceHeading.toStringAsFixed(0)}°', Colors.teal, cardColor, textSecondary),
-            ],
+          // Info cards row — uses ValueListenableBuilder to avoid rebuilding the whole screen
+          ValueListenableBuilder<double>(
+            valueListenable: _headingNotifier,
+            builder: (context, heading, _) => Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                _infoCard(isUrdu ? 'قبلہ' : 'Qibla', '${_qiblaBearing.toStringAsFixed(0)}°', primaryColor, cardColor, textSecondary),
+                const SizedBox(width: 16),
+                _infoCard(isUrdu ? 'فون کی سمت' : 'Heading', '${heading.toStringAsFixed(0)}°', Colors.teal, cardColor, textSecondary),
+              ],
+            ),
           ),
           const SizedBox(height: 16),
 
@@ -434,6 +625,27 @@ class _QiblaScreenState extends State<QiblaScreen>
               textAlign: TextAlign.center,
               style: TextStyle(fontSize: 15, color: textSecondary),
             ),
+          ),
+
+          TextButton(
+            onPressed: () {
+              showDialog(
+                context: context,
+                builder: (ctx) => AlertDialog(
+                  title: Text(isUrdu ? 'مقام تبدیل کریں' : 'Change Location'),
+                  content: TextField(
+                    onSubmitted: (val) {
+                      Navigator.pop(ctx);
+                      _setManualLocation(val);
+                    },
+                    decoration: InputDecoration(
+                      hintText: isUrdu ? 'شہر کا نام لکھیں' : 'Enter city (e.g. Karachi)',
+                    ),
+                  ),
+                ),
+              );
+            },
+            child: Text(isUrdu ? 'مقام غلط ہے؟ دستی تلاش کریں' : 'Wrong location? Search manually', style: const TextStyle(fontSize: 12)),
           ),
 
           const SizedBox(height: 32),
@@ -543,6 +755,38 @@ class _QiblaScreenState extends State<QiblaScreen>
 
           // ── Mosque list ────────────────────────────────────────────────
           if (_mosques.isNotEmpty) ...[
+            // ── View on Map button ──────────────────────────────────────
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: () {
+                  final mapItems = _mosques.map((m) => MosqueMapItem(
+                    name: m.name,
+                    lat: m.lat,
+                    lon: m.lon,
+                    distanceKm: m.distanceKm,
+                  )).toList();
+                  Navigator.push(context, MaterialPageRoute(builder: (_) =>
+                    MosqueMapScreen(
+                      userLat: _currentPosition!.latitude,
+                      userLon: _currentPosition!.longitude,
+                      initialMosques: mapItems,
+                    )));
+                },
+                icon: const Icon(Icons.map_rounded, size: 18),
+                label: Text(
+                  isUrdu ? 'نقشے پر دیکھیں' : 'View on Map with Routes',
+                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                ),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: primaryColor,
+                  side: BorderSide(color: primaryColor.withOpacity(0.4)),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
             // Closest mosque highlight card
             _buildClosestMosqueCard(_mosques.first, primaryColor, isDark, isUrdu),
             const SizedBox(height: 10),
@@ -576,8 +820,7 @@ class _QiblaScreenState extends State<QiblaScreen>
         children: [
           Container(
             padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(color: Colors.white.withOpacity(0.2), borderRadius: BorderRadius.circular(12)),
-            child: const Text('🕌', style: TextStyle(fontSize: 26)),
+            child: const Icon(Icons.mosque_rounded, size: 28, color: Colors.white),
           ),
           const SizedBox(width: 14),
           Expanded(
@@ -673,23 +916,48 @@ class _QiblaScreenState extends State<QiblaScreen>
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// QiblaCompassPainter — unchanged
-// ─────────────────────────────────────────────────────────────────────────────
 class QiblaCompassPainter extends CustomPainter {
   final double arrowAngleRad;
   final double deviceHeadingDeg;
   final Color primaryColor;
+  final bool isAligned;
 
-  QiblaCompassPainter({required this.arrowAngleRad, required this.deviceHeadingDeg, required this.primaryColor});
+  QiblaCompassPainter({
+    required this.arrowAngleRad,
+    required this.deviceHeadingDeg,
+    required this.primaryColor,
+    required this.isAligned,
+  });
 
   @override
   void paint(Canvas canvas, Size size) {
     final center = Offset(size.width / 2, size.height / 2);
     final radius = size.width / 2 - 8;
 
-    canvas.drawCircle(center, radius, Paint()..color = Colors.grey.withOpacity(0.08)..style = PaintingStyle.fill);
-    canvas.drawCircle(center, radius, Paint()..color = Colors.grey.withOpacity(0.25)..style = PaintingStyle.stroke..strokeWidth = 1.5);
+    // Draw the backing concentric circles in premium olive-gold tones
+    final bgPaint = Paint()
+      ..shader = RadialGradient(
+        colors: [
+          isAligned
+              ? const Color(0xFFD4AF37).withOpacity(0.08)
+              : primaryColor.withOpacity(0.04),
+          Colors.transparent,
+        ],
+      ).createShader(Rect.fromCircle(center: center, radius: radius))
+      ..style = PaintingStyle.fill;
+    canvas.drawCircle(center, radius, bgPaint);
+
+    // Multiple concentric circles for structured spiritual design
+    final borderPaint = Paint()
+      ..color = isAligned
+          ? const Color(0xFFD4AF37).withOpacity(0.4)
+          : Colors.grey.withOpacity(0.25)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.2;
+
+    canvas.drawCircle(center, radius, borderPaint);
+    canvas.drawCircle(center, radius * 0.85, borderPaint..color = borderPaint.color.withOpacity(0.12));
+    canvas.drawCircle(center, radius * 0.5, borderPaint..color = borderPaint.color.withOpacity(0.06));
 
     final tickPaint = Paint()..color = Colors.grey.withOpacity(0.4)..strokeWidth = 1;
     for (int i = 0; i < 36; i++) {
@@ -703,33 +971,70 @@ class QiblaCompassPainter extends CustomPainter {
       );
     }
 
-    _drawCardinalLabel(canvas, center, radius, 'N', 0, Colors.red);
+    _drawCardinalLabel(canvas, center, radius, 'N', 0, isAligned ? const Color(0xFFD4AF37) : Colors.red);
     _drawCardinalLabel(canvas, center, radius, 'E', pi / 2, Colors.grey);
     _drawCardinalLabel(canvas, center, radius, 'S', pi, Colors.grey);
     _drawCardinalLabel(canvas, center, radius, 'W', 3 * pi / 2, Colors.grey);
 
-    final arrowLength = radius * 0.62;
-    final tailLength = radius * 0.30;
+    final arrowLength = radius * 0.65;
+    final tailLength = radius * 0.25;
     final tip = Offset(center.dx + arrowLength * sin(arrowAngleRad), center.dy - arrowLength * cos(arrowAngleRad));
     final tail = Offset(center.dx - tailLength * sin(arrowAngleRad), center.dy + tailLength * cos(arrowAngleRad));
 
-    canvas.drawLine(tail, tip, Paint()..color = primaryColor..strokeWidth = 6..strokeCap = StrokeCap.round..style = PaintingStyle.stroke);
+    // Outer highlight needle shadow when aligned
+    if (isAligned) {
+      canvas.drawLine(
+        tail,
+        tip,
+        Paint()
+          ..color = const Color(0xFFD4AF37).withOpacity(0.25)
+          ..strokeWidth = 10
+          ..strokeCap = StrokeCap.round
+          ..style = PaintingStyle.stroke,
+      );
+    }
+
+    canvas.drawLine(tail, tip, Paint()..color = primaryColor..strokeWidth = 5..strokeCap = StrokeCap.round..style = PaintingStyle.stroke);
 
     final perpAngle = arrowAngleRad + pi / 2;
-    const wingSpread = 12.0;
-    const wingBack = 22.0;
+    const wingSpread = 10.0;
+    const wingBack = 18.0;
     final leftWing = Offset(tip.dx - wingBack * sin(arrowAngleRad) + wingSpread * sin(perpAngle), tip.dy + wingBack * cos(arrowAngleRad) - wingSpread * cos(perpAngle));
     final rightWing = Offset(tip.dx - wingBack * sin(arrowAngleRad) - wingSpread * sin(perpAngle), tip.dy + wingBack * cos(arrowAngleRad) + wingSpread * cos(perpAngle));
     final headPath = Path()..moveTo(tip.dx, tip.dy)..lineTo(leftWing.dx, leftWing.dy)..lineTo(rightWing.dx, rightWing.dy)..close();
     canvas.drawPath(headPath, Paint()..color = primaryColor);
 
-    canvas.drawCircle(tail, 5, Paint()..color = primaryColor.withOpacity(0.5));
+    canvas.drawCircle(tail, 4, Paint()..color = primaryColor.withOpacity(0.5));
 
-    final tp = TextPainter(text: const TextSpan(text: '🕋', style: TextStyle(fontSize: 18)), textDirection: TextDirection.ltr)..layout();
-    tp.paint(canvas, Offset(tip.dx - tp.width / 2, tip.dy - tp.height / 2 - 14));
+    // Draw a premium custom-drawn Kaaba cube instead of an emoji!
+    final double kaabaSize = 16.0;
+    final kaabaCenter = Offset(tip.dx, tip.dy - 18);
+    final kaabaRect = Rect.fromCenter(center: kaabaCenter, width: kaabaSize, height: kaabaSize);
 
-    canvas.drawCircle(center, 8, Paint()..color = Colors.white);
-    canvas.drawCircle(center, 8, Paint()..color = Colors.grey..style = PaintingStyle.stroke..strokeWidth = 1.5);
+    // Draw the main black cube body
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(kaabaRect, const Radius.circular(3)),
+      Paint()..color = Colors.black..style = PaintingStyle.fill,
+    );
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(kaabaRect, const Radius.circular(3)),
+      Paint()..color = isAligned ? const Color(0xFFD4AF37).withOpacity(0.5) : Colors.grey.shade800..style = PaintingStyle.stroke..strokeWidth = 1.0,
+    );
+
+    // Draw the golden band (Kiswa) near the top (top 20% of the cube)
+    final goldBandRect = Rect.fromLTWH(
+      kaabaRect.left,
+      kaabaRect.top + 3.0,
+      kaabaRect.width,
+      2.5,
+    );
+    canvas.drawRect(
+      goldBandRect,
+      Paint()..color = const Color(0xFFFFD700)..style = PaintingStyle.fill, // Golden Kiswa color
+    );
+
+    canvas.drawCircle(center, 7, Paint()..color = Colors.white);
+    canvas.drawCircle(center, 7, Paint()..color = isAligned ? const Color(0xFFD4AF37) : Colors.grey..style = PaintingStyle.stroke..strokeWidth = 1.5);
   }
 
   void _drawCardinalLabel(Canvas canvas, Offset center, double radius, String label, double angle, Color color) {
@@ -743,5 +1048,5 @@ class QiblaCompassPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant QiblaCompassPainter old) =>
-      old.arrowAngleRad != arrowAngleRad || old.deviceHeadingDeg != deviceHeadingDeg;
+      old.arrowAngleRad != arrowAngleRad || old.deviceHeadingDeg != deviceHeadingDeg || old.isAligned != isAligned;
 }
