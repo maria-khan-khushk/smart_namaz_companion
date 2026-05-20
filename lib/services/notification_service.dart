@@ -8,6 +8,41 @@ import '../services/hadith_service.dart';
 import '../providers/language_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../services/streak_service.dart';
+import '../models/daily_prayer_record.dart';
+
+@pragma('vm:entry-point')
+void notificationTapBackground(NotificationResponse response) async {
+  if (response.actionId == 'prayed') {
+    final prayerName = response.payload;
+    if (prayerName != null && prayerName.isNotEmpty) {
+      final streakService = StreakService();
+      final now = DateTime.now();
+      final date = DateTime(now.year, now.month, now.day);
+      var records = await streakService.getAllRecords();
+      var record = records[date];
+      if (record == null) {
+        record = DailyPrayerRecord(
+          date: date,
+          prayersCompleted: {'Fajr': false, 'Dhuhr': false, 'Asr': false, 'Maghrib': false, 'Isha': false},
+        );
+      }
+      record.prayersCompleted[prayerName] = true;
+      await streakService.saveRecord(record);
+    }
+  } else if (response.actionId == 'snooze') {
+    final prayerName = response.payload;
+    if (prayerName != null && prayerName.isNotEmpty) {
+      await NotificationService.initializeTimeZonesIfNeeded();
+      await NotificationService.scheduleInteractiveReminder(
+        id: response.id != null ? response.id! + 100 : 9999,
+        prayerName: prayerName,
+        scheduledTime: DateTime.now().add(const Duration(minutes: 15)),
+      );
+    }
+  }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Top-level callback — AndroidAlarmManager fires this even when app is closed.
@@ -85,18 +120,20 @@ class NotificationService {
 
   // ── Initialize ─────────────────────────────────────────────────────────────
 
-  static Future<void> initialize() async {
+  static Future<void> initializeTimeZonesIfNeeded() async {
     if (!tz.timeZoneDatabase.isInitialized) {
       tz.initializeTimeZones();
+      try {
+        final String timeZoneName = await FlutterTimezone.getLocalTimezone();
+        tz.setLocalLocation(tz.getLocation(timeZoneName));
+      } catch (e) {
+        tz.setLocalLocation(tz.getLocation('UTC'));
+      }
     }
-    try {
-      final String timeZoneName = await FlutterTimezone.getLocalTimezone();
-      tz.setLocalLocation(tz.getLocation(timeZoneName));
-      print('Local timezone set to: $timeZoneName');
-    } catch (e) {
-      print('Error mapping local timezone: $e. Fallback to UTC.');
-      tz.setLocalLocation(tz.getLocation('UTC'));
-    }
+  }
+
+  static Future<void> initialize() async {
+    await initializeTimeZonesIfNeeded();
 
     const AndroidInitializationSettings androidSettings =
         AndroidInitializationSettings('@mipmap/ic_launcher');
@@ -109,6 +146,7 @@ class NotificationService {
     await _notifications.initialize(
       const InitializationSettings(android: androidSettings, iOS: iosSettings),
       onDidReceiveNotificationResponse: _onNotificationTap,
+      onDidReceiveBackgroundNotificationResponse: notificationTapBackground,
     );
 
     await AndroidAlarmManager.initialize();
@@ -281,10 +319,30 @@ class NotificationService {
             rescheduleOnReboot: true,
           );
           print('Azan alarm set: id=${entry.key} at $prayerTime');
+          
+          // Schedule Interactive Reminder
+          final prefs = await SharedPreferences.getInstance();
+          final interval = prefs.getInt('reminder_interval') ?? 30;
+          await scheduleInteractiveReminder(
+            id: entry.key + 2000,
+            prayerName: getPrayerNameFromId(entry.key),
+            scheduledTime: prayerTime.add(Duration(minutes: interval)),
+          );
         }
       } catch (e) {
         print('Error scheduling azan alarm id=${entry.key}: $e');
       }
+    }
+  }
+
+  static String getPrayerNameFromId(int id) {
+    switch (id) {
+      case _AzanIds.fajr: return 'Fajr';
+      case _AzanIds.dhuhr: return 'Dhuhr';
+      case _AzanIds.asr: return 'Asr';
+      case _AzanIds.maghrib: return 'Maghrib';
+      case _AzanIds.isha: return 'Isha';
+      default: return 'Prayer';
     }
   }
 
@@ -294,8 +352,50 @@ class NotificationService {
       _AzanIds.maghrib, _AzanIds.isha,
     ]) {
       await AndroidAlarmManager.cancel(id);
+      await _notifications.cancel(id + 2000); // cancel reminder too
     }
-    print('All azan alarms cancelled');
+    print('All azan alarms and reminders cancelled');
+  }
+
+  // ── Interactive Reminder ──────────────────────────────────────────────────
+  static Future<void> scheduleInteractiveReminder({
+    required int id,
+    required String prayerName,
+    required DateTime scheduledTime,
+  }) async {
+    await initializeTimeZonesIfNeeded();
+    final allowed = await requestAlarmPermissions();
+    if (!allowed) return;
+
+    final AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
+      _defaultChannelId,
+      'Azan Notifications',
+      channelDescription: 'Prayer time notifications',
+      importance: Importance.max,
+      priority: Priority.high,
+      playSound: true,
+      enableVibration: true,
+      actions: <AndroidNotificationAction>[
+        const AndroidNotificationAction('prayed', 'Prayed', showsUserInterface: true, cancelNotification: true),
+        const AndroidNotificationAction('snooze', 'Snooze 15m', showsUserInterface: true, cancelNotification: true),
+        const AndroidNotificationAction('skip', 'Skip', showsUserInterface: true, cancelNotification: true),
+      ],
+    );
+
+    const DarwinNotificationDetails iosDetails = DarwinNotificationDetails(
+      presentAlert: true, presentSound: true, presentBadge: true,
+    );
+
+    await _notifications.zonedSchedule(
+      id,
+      'Did you pray $prayerName?',
+      'Tap to log it in your streak tracker.',
+      tz.TZDateTime.from(scheduledTime, tz.local),
+      NotificationDetails(android: androidDetails, iOS: iosDetails),
+      androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+      uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime,
+      payload: prayerName,
+    );
   }
 
   // ── Generic notification (hadith, test) ─────────────────────────────────────

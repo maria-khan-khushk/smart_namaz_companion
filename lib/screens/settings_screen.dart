@@ -18,17 +18,21 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   bool _notificationsEnabled = false;
   bool _isLoading = false;
+  String _tasbeehSensitivity = 'Medium';
+  int _reminderInterval = 30;
 
   @override
   void initState() {
     super.initState();
-    _loadNotificationPreference();
+    _loadPreferences();
   }
 
-  Future<void> _loadNotificationPreference() async {
+  Future<void> _loadPreferences() async {
     final prefs = await SharedPreferences.getInstance();
     setState(() {
       _notificationsEnabled = prefs.getBool('notifications_enabled') ?? false;
+      _tasbeehSensitivity = prefs.getString('tasbeeh_sensitivity') ?? 'Medium';
+      _reminderInterval = prefs.getInt('reminder_interval') ?? 30;
     });
   }
 
@@ -212,6 +216,64 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       onChanged: _toggleNotifications,
                       activeColor: AppColors.primaryMuted,
                     ),
+            ),
+          ),
+          SizedBox(height: 16),
+          Card(
+            elevation: 2,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            child: ListTile(
+              leading: Icon(Icons.timer, color: AppColors.primaryMuted),
+              title: Text(isUrdu ? 'یاددہانی کا وقفہ' : 'Reminder Interval'),
+              subtitle: Text(isUrdu ? 'اذان کے بعد یاددہانی کا وقت' : 'Time after Azan for reminder'),
+              trailing: DropdownButton<int>(
+                value: _reminderInterval,
+                items: [15, 30, 45, 60].map((int value) {
+                  return DropdownMenuItem<int>(
+                    value: value,
+                    child: Text('$value ${isUrdu ? 'منٹ' : 'mins'}'),
+                  );
+                }).toList(),
+                onChanged: (value) async {
+                  if (value != null) {
+                    setState(() => _reminderInterval = value);
+                    final prefs = await SharedPreferences.getInstance();
+                    await prefs.setInt('reminder_interval', value);
+                  }
+                },
+              ),
+            ),
+          ),
+          SizedBox(height: 16),
+          Card(
+            elevation: 2,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            child: ListTile(
+              leading: Icon(Icons.sensors, color: AppColors.primaryMuted),
+              title: Text(isUrdu ? 'تسبیح سنسر حساسیت' : 'Tasbeeh Sensitivity'),
+              subtitle: Text(isUrdu ? 'ہلانے اور لہرانے کی حساسیت' : 'Shake and wave sensitivity'),
+              trailing: DropdownButton<String>(
+                value: _tasbeehSensitivity,
+                items: ['Low', 'Medium', 'High'].map((String value) {
+                  String display = value;
+                  if (isUrdu) {
+                    if (value == 'Low') display = 'کم';
+                    else if (value == 'Medium') display = 'درمیانی';
+                    else display = 'زیادہ';
+                  }
+                  return DropdownMenuItem<String>(
+                    value: value,
+                    child: Text(display),
+                  );
+                }).toList(),
+                onChanged: (value) async {
+                  if (value != null) {
+                    setState(() => _tasbeehSensitivity = value);
+                    final prefs = await SharedPreferences.getInstance();
+                    await prefs.setString('tasbeeh_sensitivity', value);
+                  }
+                },
+              ),
             ),
           ),
           SizedBox(height: 16),

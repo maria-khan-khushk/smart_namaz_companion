@@ -163,6 +163,8 @@ class _TasbeehScreenState extends State<TasbeehScreen>
   bool _isTtsSpeakDhikr = false;
   StreamSubscription? _shakeSub;
   DateTime? _lastShake;
+  DateTime? _lastProximityEvent;
+  String _tasbeehSensitivity = 'Medium';
 
   // Debounced save timer — avoids hammering disk on every tap
   Timer? _saveDebounce;
@@ -176,6 +178,9 @@ class _TasbeehScreenState extends State<TasbeehScreen>
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
+    _tabController.addListener(() {
+      if (mounted) setState(() {});
+    });
 
     _pulseController = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 120));
@@ -220,6 +225,7 @@ class _TasbeehScreenState extends State<TasbeehScreen>
       _isTtsEnabled = prefs.getBool('tasbeeh_tts') ?? false;
       _isVibrationEnabled = prefs.getBool('tasbeeh_vibration') ?? true;
       _isTtsSpeakDhikr = prefs.getBool('tasbeeh_tts_dhikr') ?? false;
+      _tasbeehSensitivity = prefs.getString('tasbeeh_sensitivity') ?? 'Medium';
       // We don't auto-enable background mode for safety, but we could if desired.
     });
     _animateProgress(_counter / _target);
@@ -259,9 +265,13 @@ class _TasbeehScreenState extends State<TasbeehScreen>
       _shakeSub = userAccelerometerEvents.listen((UserAccelerometerEvent event) {
         // Simple shake detection logic
         double acceleration = sqrt(event.x * event.x + event.y * event.y + event.z * event.z);
-        if (acceleration > 12.0) { // Sensitivity threshold
+        double threshold = 12.0; // Low sensitivity
+        if (_tasbeehSensitivity == 'High') threshold = 4.0;
+        else if (_tasbeehSensitivity == 'Medium') threshold = 8.0;
+
+        if (acceleration > threshold) { 
           final now = DateTime.now();
-          if (_lastShake == null || now.difference(_lastShake!).inMilliseconds > 800) {
+          if (_lastShake == null || now.difference(_lastShake!).inMilliseconds > 600) {
             _increment();
             _lastShake = now;
           }
@@ -301,9 +311,11 @@ class _TasbeehScreenState extends State<TasbeehScreen>
       _proximitySub = ProximitySensor.events.listen((int event) {
         // Event 1 = hand nearby, 0 = hand away
         if (event == 1) {
-          if (!_proximityHandNearby) {
+          final now = DateTime.now();
+          if (!_proximityHandNearby && (_lastProximityEvent == null || now.difference(_lastProximityEvent!).inMilliseconds > 500)) {
             _increment();
             _proximityHandNearby = true;
+            _lastProximityEvent = now;
           }
         } else {
           _proximityHandNearby = false;
@@ -585,7 +597,7 @@ class _TasbeehScreenState extends State<TasbeehScreen>
   Widget _buildSettingsBar(bool isUrdu, Color primary, bool isDark) {
     return Container(
       margin: const EdgeInsets.fromLTRB(12, 10, 12, 6),
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+      padding: const EdgeInsets.symmetric(vertical: 12),
       decoration: BoxDecoration(
         color: isDark ? Colors.white.withOpacity(0.05) : Colors.white,
         borderRadius: BorderRadius.circular(20),
@@ -598,65 +610,72 @@ class _TasbeehScreenState extends State<TasbeehScreen>
         ],
         border: Border.all(color: primary.withOpacity(0.1)),
       ),
-      child: Wrap(
-        alignment: WrapAlignment.spaceBetween,
-        runSpacing: 10,
-        spacing: 8,
-        children: [
-          _settingsToggle(
-            icon: Icons.waves_rounded,
-            active: _isProximityEnabled,
-            onTap: () => _toggleProximity(!_isProximityEnabled),
-            label: isUrdu ? 'وِیو' : 'Wave',
-            tooltip: isUrdu ? 'ہاتھ ہلا کر گنتی کریں (سینسر)' : 'Wave hand over sensor to count',
-            color: primary,
-          ),
-          _settingsToggle(
-            icon: Icons.volume_up_rounded,
-            active: _isTtsEnabled,
-            onTap: () => setState(() => _isTtsEnabled = !_isTtsEnabled),
-            label: isUrdu ? 'آواز' : 'Voice',
-            tooltip: isUrdu ? 'ذکر یا نمبر کی آواز فعال کریں' : 'Enable voice for dhikr or numbers',
-            color: primary,
-          ),
-          _settingsToggle(
-            icon: _isTtsSpeakDhikr ? Icons.text_fields_rounded : Icons.numbers_rounded,
-            active: _isTtsEnabled,
-            onTap: () {
-              setState(() => _isTtsSpeakDhikr = !_isTtsSpeakDhikr);
-              _saveStateNow();
-            },
-            label: isUrdu
-              ? (_isTtsSpeakDhikr ? 'ذکر' : 'نمبر')
-              : (_isTtsSpeakDhikr ? 'Dhikr' : 'Number'),
-            tooltip: isUrdu ? 'ذکر یا نمبر کے درمیان تبدیلی' : 'Switch between speaking Dhikr or Numbers',
-            color: primary,
-          ),
-          _settingsToggle(
-            icon: Icons.vibration_rounded,
-            active: _isVibrationEnabled,
-            onTap: () => setState(() => _isVibrationEnabled = !_isVibrationEnabled),
-            label: isUrdu ? 'تھرتھراہٹ' : 'Haptic',
-            tooltip: isUrdu ? 'گنتی پر موبائل تھرتھراہٹ' : 'Vibrate on each count',
-            color: primary,
-          ),
-          _settingsToggle(
-            icon: Icons.auto_awesome_motion_rounded,
-            active: _isShakeEnabled,
-            onTap: () => _toggleShake(!_isShakeEnabled),
-            label: isUrdu ? 'ہلائیں' : 'Shake',
-            tooltip: isUrdu ? 'موبائل ہلا کر گنتی کریں' : 'Shake phone to count',
-            color: primary,
-          ),
-          _settingsToggle(
-            icon: Icons.phonelink_lock_rounded,
-            active: _isBackgroundEnabled,
-            onTap: () => _toggleBackgroundMode(!_isBackgroundEnabled),
-            label: isUrdu ? 'بیک گراؤنڈ' : 'Background',
-            tooltip: isUrdu ? 'اسکرین بند ہونے پر بھی گنتی جاری رکھیں' : 'Continue counting even with screen off',
-            color: primary,
-          ),
-        ],
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        physics: const BouncingScrollPhysics(),
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: Row(
+          children: [
+            _settingsToggle(
+              icon: Icons.waves_rounded,
+              active: _isProximityEnabled,
+              onTap: () => _toggleProximity(!_isProximityEnabled),
+              label: isUrdu ? 'وِیو' : 'Wave',
+              tooltip: isUrdu ? 'ہاتھ ہلا کر گنتی کریں (سینسر)' : 'Wave hand over sensor to count',
+              color: primary,
+            ),
+            const SizedBox(width: 16),
+            _settingsToggle(
+              icon: Icons.volume_up_rounded,
+              active: _isTtsEnabled,
+              onTap: () => setState(() => _isTtsEnabled = !_isTtsEnabled),
+              label: isUrdu ? 'آواز' : 'Voice',
+              tooltip: isUrdu ? 'ذکر یا نمبر کی آواز فعال کریں' : 'Enable voice for dhikr or numbers',
+              color: primary,
+            ),
+            const SizedBox(width: 16),
+            _settingsToggle(
+              icon: _isTtsSpeakDhikr ? Icons.text_fields_rounded : Icons.numbers_rounded,
+              active: _isTtsEnabled,
+              onTap: () {
+                setState(() => _isTtsSpeakDhikr = !_isTtsSpeakDhikr);
+                _saveStateNow();
+              },
+              label: isUrdu
+                ? (_isTtsSpeakDhikr ? 'ذکر' : 'نمبر')
+                : (_isTtsSpeakDhikr ? 'Dhikr' : 'Number'),
+              tooltip: isUrdu ? 'ذکر یا نمبر کے درمیان تبدیلی' : 'Switch between speaking Dhikr or Numbers',
+              color: primary,
+            ),
+            const SizedBox(width: 16),
+            _settingsToggle(
+              icon: Icons.vibration_rounded,
+              active: _isVibrationEnabled,
+              onTap: () => setState(() => _isVibrationEnabled = !_isVibrationEnabled),
+              label: isUrdu ? 'تھرتھراہٹ' : 'Haptic',
+              tooltip: isUrdu ? 'گنتی پر موبائل تھرتھراہٹ' : 'Vibrate on each count',
+              color: primary,
+            ),
+            const SizedBox(width: 16),
+            _settingsToggle(
+              icon: Icons.auto_awesome_motion_rounded,
+              active: _isShakeEnabled,
+              onTap: () => _toggleShake(!_isShakeEnabled),
+              label: isUrdu ? 'ہلائیں' : 'Shake',
+              tooltip: isUrdu ? 'موبائل ہلا کر گنتی کریں' : 'Shake phone to count',
+              color: primary,
+            ),
+            const SizedBox(width: 16),
+            _settingsToggle(
+              icon: Icons.phonelink_lock_rounded,
+              active: _isBackgroundEnabled,
+              onTap: () => _toggleBackgroundMode(!_isBackgroundEnabled),
+              label: isUrdu ? 'بیک گراؤنڈ' : 'Background',
+              tooltip: isUrdu ? 'اسکرین بند ہونے پر بھی گنتی جاری رکھیں' : 'Continue counting even with screen off',
+              color: primary,
+            ),
+          ],
+        ),
       ),
     );
   }

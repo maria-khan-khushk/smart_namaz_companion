@@ -30,7 +30,7 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   PrayerTimeModel? prayerTimes;
   bool isFetchingFresh = false;
   String errorMsg = '';
@@ -43,6 +43,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadCachedTimes();
     Future.delayed(const Duration(milliseconds: 500), _fetchFreshTimes);
     _loadHadithData();
@@ -50,7 +51,17 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      if (prayerTimes == null || errorMsg.isNotEmpty) {
+        _fetchFreshTimes();
+      }
+    }
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _countdownTimer?.cancel();
     super.dispose();
   }
@@ -281,15 +292,22 @@ class _HomeScreenState extends State<HomeScreen> {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
               decoration: BoxDecoration(
-                color: primaryColor,
+                gradient: const LinearGradient(
+                  colors: [Colors.amber, Colors.orange],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
                 borderRadius: BorderRadius.circular(20),
+                boxShadow: [
+                  BoxShadow(color: Colors.orange.withOpacity(0.4), blurRadius: 8, offset: const Offset(0, 2)),
+                ],
               ),
               child: const Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.insights_rounded, color: Colors.white, size: 18),
+                  Icon(Icons.nightlight_round, color: Colors.white, size: 14),
                   SizedBox(width: 4),
-                  Text('Streak', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
+                  Text('Streak', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
                 ],
               ),
             ),
@@ -319,7 +337,45 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       );
     }
-    return const Center(child: CircularProgressIndicator());
+    return _buildSkeletonUI(primaryColor);
+  }
+
+  Widget _buildSkeletonUI(Color primaryColor) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final baseColor = isDark ? Colors.white.withOpacity(0.05) : Colors.black.withOpacity(0.05);
+    final highlightColor = isDark ? Colors.white.withOpacity(0.1) : Colors.black.withOpacity(0.1);
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+      children: [
+        // Hero countdown skeleton
+        Container(
+          height: 180,
+          decoration: BoxDecoration(
+            color: baseColor,
+            borderRadius: BorderRadius.circular(28),
+          ),
+        ),
+        const SizedBox(height: 12),
+        // Section label skeleton
+        Padding(
+          padding: const EdgeInsets.only(left: 4, bottom: 8),
+          child: Container(
+            width: 100, height: 16,
+            decoration: BoxDecoration(color: baseColor, borderRadius: BorderRadius.circular(4)),
+          ),
+        ),
+        // 5 Prayer card skeletons
+        ...List.generate(5, (index) => Container(
+          margin: const EdgeInsets.only(bottom: 10),
+          height: 78,
+          decoration: BoxDecoration(
+            color: baseColor,
+            borderRadius: BorderRadius.circular(20),
+          ),
+        )),
+      ],
+    );
   }
 
   // ── Main body ────────────────────────────────────────────────────────────
